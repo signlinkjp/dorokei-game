@@ -6,7 +6,7 @@
   "description": "DOROKEI — cops & robbers with hidden spies, in a wide pop-art city (3D, offline)",
   "license": "UNLICENSED",
   "scripts": {
-    "test": "node --test test/core.test.js",
+    "test": "node --test test/core.test.js test/build2.test.js",
     "serve": "node tools/serve.mjs",
     "shot": "node tools/shot.mjs",
     "interaction": "node tools/interaction-test.mjs",

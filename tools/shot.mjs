@@ -1,5 +1,9 @@
-// ヘッドレスChromiumでタイトル画面とプレイ画面を撮影する
-// 使い方: node tools/shot.mjs  （PLAYWRIGHT_DIR で playwright の場所を変更可）
+// ヘッドレスChromiumで DOROKEI の画面を撮影する（Build 2）
+//   node tools/shot.mjs                 … 全シナリオ
+//   ONLY=chars node tools/shot.mjs      … 一部だけ
+//
+// 出力先は workspace の downloads/。縦長UI（タイトル・モーダル）は iPhone 相当の
+// 430×932、街のプレイ画面とキャラは 1280×720 で撮る。
 import { createRequire } from 'node:module';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -9,7 +13,6 @@ import { startServer } from './serve.mjs';
 const PLAYWRIGHT_DIR = process.env.PLAYWRIGHT_DIR || '/workspace/work/dcd-b17/';
 const BROWSERS = process.env.PLAYWRIGHT_BROWSERS_PATH || '/workspace/work/dcd-b17/browsers';
 process.env.PLAYWRIGHT_BROWSERS_PATH = BROWSERS;
-// システムに入っていない atk/atspi はローカル展開した .deb から供給する
 const LIB_DIR = path.resolve(
   fileURLToPath(new URL('../.browser-libs/usr/lib/x86_64-linux-gnu', import.meta.url)),
 );
@@ -19,9 +22,6 @@ const require = createRequire(PLAYWRIGHT_DIR);
 const { chromium } = require('playwright');
 
 const OUT_DIR = path.resolve(fileURLToPath(new URL('../../../downloads/', import.meta.url)));
-const W = Number(process.env.SHOT_W || 1280);
-const H = Number(process.env.SHOT_H || 720);
-
 const port = 8901;
 const server = await startServer(port);
 const base = `http://127.0.0.1:${port}/`;
@@ -39,53 +39,197 @@ const browser = await chromium.launch({
     '--use-angle=swiftshader',
     '--enable-unsafe-swiftshader',
     '--disable-dev-shm-usage',
+    '--mute-audio',
   ],
 });
 
-const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 2 });
 const logs = [];
-page.on('console', (m) => logs.push(`[${m.type()}] ${m.text()}`));
-page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
 
-async function shoot(url, file, waitMs, prepare) {
-  await page.goto(base + url, { waitUntil: 'load' });
+async function openPage(viewport, scale = 2) {
+  const page = await browser.newPage({ viewport, deviceScaleFactor: scale });
+  page.on('console', (m) => logs.push(`[${m.type()}] ${m.text()}`));
+  page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
+  return page;
+}
+
+async function shoot(page, file, waitMs = 500, prepare = null) {
+  if (prepare) await page.evaluate(prepare);
   await page.waitForTimeout(waitMs);
-  if (prepare) await prepare();
-  await page.waitForTimeout(400);
   const target = path.join(OUT_DIR, file);
   await page.screenshot({ path: target });
   console.log('shot:', target);
   return target;
 }
 
-// 1) タイトル
-await shoot('', 'dorokei-title.png', 3600, async () => {
-  await page.evaluate(() => {
-    document.querySelector('.title-inner')?.scrollIntoView?.({ block: 'center' });
-  });
-});
+const PHONE = { width: 430, height: 932 };
+const WIDE = { width: 1280, height: 720 };
+const ONLY = process.env.ONLY || '';
 
-// 2) プレイ画面（広い街の全体＋HUD＋レーダー）
-const playUrl = process.env.PLAY_URL || '?demo=1&warp=42&seed=7&hud=1&view=map';
-await shoot(playUrl, 'dorokei-play.png', 3200, async () => {
+const want = (name) => !ONLY || ONLY.split(',').includes(name);
+
+// ---- タイトル（日本語） ---------------------------------------------------
+if (want('title')) {
+  const page = await openPage(PHONE);
+  await page.goto(base, { waitUntil: 'load' });
+  await page.waitForTimeout(2600);
+  await shoot(page, 'dorokei-title.png', 300);
+  await page.close();
+}
+
+// ---- タイトル（英語＝言語切替の確認） ------------------------------------
+if (want('title-en')) {
+  const page = await openPage(PHONE);
+  await page.goto(base, { waitUntil: 'load' });
+  await page.waitForTimeout(2200);
+  await shoot(page, 'dorokei-title-en.png', 500, () => {
+    window.__dorokei.setLang('en');
+  });
+  await page.close();
+}
+
+// ---- あそびかた・設定モーダル --------------------------------------------
+if (want('howto')) {
+  const page = await openPage(PHONE);
+  await page.goto(base, { waitUntil: 'load' });
+  await page.waitForTimeout(1800);
+  await shoot(page, 'dorokei-howto.png', 500, () => {
+    window.__dorokei.openModal('howto');
+  });
+  await page.close();
+}
+
+if (want('settings')) {
+  const page = await openPage(PHONE);
+  await page.goto(base, { waitUntil: 'load' });
+  await page.waitForTimeout(1800);
+  await shoot(page, 'dorokei-settings.png', 500, () => {
+    window.__dorokei.openModal('settings');
+  });
+  await page.close();
+}
+
+// ---- 街のプレイ画面（俯瞰） ----------------------------------------------
+if (want('play')) {
+  const page = await openPage(WIDE);
+  await page.goto(`${base}?demo=1&warp=42&seed=7&hud=1&view=map`, { waitUntil: 'load' });
+  await page.waitForTimeout(3200);
   const info = await page.evaluate(() => {
     const g = window.__dorokei?.game;
     if (!g) return { error: 'no game' };
     return {
+      stage: g.stage,
       phase: g.phase,
       time: Math.round(g.time),
       counts: g.counts(),
       stats: g.stats,
-      player: { role: g.player.role, state: g.player.state, x: +g.player.x.toFixed(1), z: +g.player.z.toFixed(1) },
+      player: { role: g.player.role, x: +g.player.x.toFixed(1), z: +g.player.z.toFixed(1) },
       events: g.events.slice(-6).map((e) => e.label),
     };
   });
   console.log('scene:', JSON.stringify(info, null, 1));
-});
+  await shoot(page, 'dorokei-play.png', 300);
+  await page.close();
+}
 
-const errors = logs.filter((l) => /error|pageerror/i.test(l));
-console.log('console:', logs.length ? logs.join('\n') : '(none)');
-if (errors.length) console.log('WARNINGS/ERRORS:', errors.length);
+// ---- キャラクター（警官×泥棒／お宝運搬中） ------------------------------
+if (want('chars')) {
+  const page = await openPage(WIDE);
+  await page.goto(`${base}?chars=1`, { waitUntil: 'load' });
+  await page.waitForTimeout(2200);
+  await shoot(page, 'dorokei-chars.png', 400);
+  await page.close();
+}
+
+if (want('carry')) {
+  const page = await openPage(WIDE);
+  await page.goto(`${base}?chars=1&carry=1`, { waitUntil: 'load' });
+  await page.waitForTimeout(2200);
+  await shoot(page, 'dorokei-chars-carry.png', 400);
+  await page.close();
+}
+
+if (want('back')) {
+  const page = await openPage(WIDE);
+  await page.goto(`${base}?chars=1&carry=1&back=1`, { waitUntil: 'load' });
+  await page.waitForTimeout(2200);
+  await shoot(page, 'dorokei-chars-back.png', 400);
+  await page.close();
+}
+
+// ---- 茂みに隠れる（残り秒数ゲージ） --------------------------------------
+if (want('hide')) {
+  const page = await openPage(WIDE);
+  await page.goto(`${base}?demo=1&team=thief&self=never&spy=none&seed=5&warp=2&hud=1`, {
+    waitUntil: 'load',
+  });
+  await page.waitForTimeout(2000);
+  await shoot(page, 'dorokei-hide.png', 500, () => {
+    const { game } = window.__dorokei;
+    const p = game.player;
+    for (const a of game.agents) {
+      if (a !== p) {
+        a.x = 72;
+        a.z = 72;
+      }
+    }
+    p.x = -30;
+    p.z = 10;
+    p.dir = 0.6;
+    game.setAction(true);
+    game.setAction(false);
+    window.__dorokei.freeze(true);
+  });
+  await page.close();
+}
+
+// ---- 警察の「捜索」（ボタンが光る／波紋が広がる） -----------------------
+if (want('search')) {
+  const page = await openPage(WIDE);
+  await page.goto(`${base}?demo=1&team=cop&self=never&spy=none&seed=5&warp=1&hud=1`, {
+    waitUntil: 'load',
+  });
+  await page.waitForTimeout(2000);
+  await shoot(page, 'dorokei-search-ready.png', 500, () => {
+    const { game, freeze } = window.__dorokei;
+    const p = game.player;
+    const thief = game.agents.find((a) => a.role === 'thief');
+    for (const a of game.agents) {
+      if (a !== p && a !== thief) {
+        a.x = 72;
+        a.z = 72;
+      }
+    }
+    p.x = -26.4;
+    p.z = 11.8;
+    p.dir = Math.atan2(-30 + 26.4, 10 - 11.8);
+    thief.x = -30.4;
+    thief.z = 10.2;
+    thief.hidden = true;
+    thief.hideLeft = 5;
+    freeze(true);
+  });
+  await shoot(page, 'dorokei-search-ripple.png', 260, () => {
+    const { game } = window.__dorokei;
+    game.setAction(true);
+    game.setAction(false);
+    const fx = game.effects[game.effects.length - 1];
+    if (fx) fx.age = 0.3;
+  });
+  const res = await page.evaluate(() => {
+    const g = window.__dorokei.game;
+    return {
+      searches: g.stats.searches,
+      jailed: g.counts().jailed,
+      events: g.events.slice(-3).map((e) => e.label),
+    };
+  });
+  console.log('search:', JSON.stringify(res));
+  await page.close();
+}
+
+const errors = logs.filter((l) => /\[error\]|pageerror/i.test(l));
+console.log('console errors:', errors.length ? errors.join('\n') : '(none)');
+if (logs.length > errors.length) console.log('warnings:', logs.length - errors.length);
 
 await browser.close();
 server.close();

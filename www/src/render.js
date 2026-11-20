@@ -3,16 +3,17 @@ import * as THREE from '../vendor/three.module.js';
 import { MAP, ROLE, looksLike } from './core.js';
 
 const COL = {
-  copBody: 0x2f6fd8,
-  copDark: 0x1c4aa0,
+  copBody: 0x2a55b8, // 紺に近い深い青のポリスユニフォーム
+  copDark: 0x16264f, // 制帽・ズボンの濃紺
   thiefBody: 0x3b4157,
   thiefDark: 0x232634,
-  bag: 0x9c6b3f,
-  skin: 0xffd3ac,
+  bag: 0x34313c,
+  skin: 0xf2c49c,
   mask: 0x14161d,
   gold: 0xffc63a,
   goldDark: 0xd89a12,
   red: 0xe8443f,
+  beanie: 0xd8382f, // 泥棒の赤いニット帽
 };
 
 function makeSky() {
@@ -63,6 +64,49 @@ function makeLabel(text, color = '#ffffff', bg = 'rgba(10,16,30,0.78)', px = 62)
   return new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
 }
 
+/** 泥棒の黒×白ボーダー（横縞）テクスチャ */
+function stripeTexture() {
+  const c = document.createElement('canvas');
+  c.width = 32;
+  c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f3f5fa';
+  g.fillRect(0, 0, 32, 128);
+  g.fillStyle = '#1d1f28';
+  const bands = 5;
+  const unit = 128 / (bands * 2 - 1);
+  for (let i = 0; i < bands; i++) g.fillRect(0, i * unit * 2, 32, unit);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/** 中心が明るい光のスプライト用テクスチャ */
+function glowTexture(inner = 'rgba(255,240,180,0.95)', outer = 'rgba(255,200,60,0)') {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(64, 64, 4, 64, 64, 64);
+  grad.addColorStop(0, inner);
+  grad.addColorStop(0.45, 'rgba(255,215,110,0.35)');
+  grad.addColorStop(1, outer);
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/** グループ内のマテリアルを重複なく集める（隠れ中の半透明化に使う） */
+function collectMats(group) {
+  const set = new Set();
+  group.traverse((o) => {
+    if (!o.material) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) set.add(m);
+  });
+  return [...set];
+}
+
 const ROOF_TINT = {
   bank: 0xf2d491,
   jewelry: 0xff9fc0,
@@ -100,11 +144,14 @@ export class World {
     this.characterRoot = new THREE.Group();
     this.treasureRoot = new THREE.Group();
     this.pingRoot = new THREE.Group();
-    this.scene.add(this.characterRoot, this.treasureRoot, this.pingRoot);
+    this.fxRoot = new THREE.Group();
+    this.scene.add(this.characterRoot, this.treasureRoot, this.pingRoot, this.fxRoot);
 
     this.chars = new Map();
     this.treasureMeshes = [];
     this.pingMeshes = [];
+    this.searchMeshes = [];
+    this.charFocus = { x: 0, z: 20 };
     this.playerRing = null;
 
     this.buildLights();
@@ -332,10 +379,12 @@ export class World {
         }
       }
 
-      if (o.sign) {
-        const label = new THREE.Sprite(makeLabel(o.sign, '#fff8e0', 'rgba(28,74,160,0.92)', 64));
-        label.scale.set(Math.min(4.0, o.w * 0.38), Math.min(2.0, o.w * 0.19), 1);
-        label.position.set(o.x, o.h + 1.4, o.z + o.d / 2 + 0.2);
+      if (o.sign && o.w >= 8) {
+        // 街の景観に馴染ませた控えめなラベル（ステージ名との役割分担）
+        const label = new THREE.Sprite(makeLabel(o.sign, '#f2f6ff', 'rgba(22,40,70,0.52)', 52));
+        label.scale.set(Math.min(2.4, o.w * 0.2), Math.min(1.2, o.w * 0.1), 1);
+        label.position.set(o.x, o.h + 0.75, o.z + o.d / 2 + 0.2);
+        label.material.opacity = 0.82;
         this.scene.add(label);
       }
     }
@@ -567,11 +616,12 @@ export class World {
   }
 
   buildBushes() {
-    // 茂み（隠れ場所）: 半透明の緑の塊＋足元のリング
+    // 茂み（隠れ場所）: 半透明になる緑の塊＋足元のリング
     this.bushMeshes = [];
+    this.bushMats = [];
     for (const b of MAP.bushes) {
       const g = new THREE.Group();
-      const mat = new THREE.MeshLambertMaterial({ color: 0x2f8f4a });
+      const mat = new THREE.MeshLambertMaterial({ color: 0x2f8f4a, transparent: true });
       for (let i = 0; i < 4; i++) {
         const a = (i / 4) * Math.PI * 2;
         const blob = new THREE.Mesh(new THREE.IcosahedronGeometry(b.r * 0.72, 0), mat);
@@ -589,6 +639,7 @@ export class World {
       g.position.set(b.x, 0, b.z);
       this.scene.add(g);
       this.bushMeshes.push(g);
+      this.bushMats.push({ mat, ring: ring.material });
     }
   }
 
@@ -662,7 +713,9 @@ export class World {
     }
     this.treasureRoot.clear();
     this.pingRoot.clear();
+    this.fxRoot.clear();
     this.pingMeshes = [];
+    this.searchMeshes = [];
     this.treasureMeshes = [];
 
     for (const a of game.agents) this.chars.set(a.id, this.buildCharacter(a));
@@ -674,91 +727,227 @@ export class World {
     }
   }
 
+  /**
+   * キャラクター（Build 2 の世界基準ルック）
+   *  警察 = 紺のポリスユニフォーム＋金バッジ＋つば付き制帽＋赤青のパトライト
+   *  泥棒 = 黒×白のボーダー＋目出しマスク＋赤いニット帽＋背中のお宝袋
+   * シルエット（制帽のつば／ニット帽の丸み＋袋）と色（紺／ボーダー＋赤）で
+   * 遠目でも一発で見分けられることを優先している。
+   */
   buildCharacter(a) {
-    const g = new THREE.Group();
     const isCop = looksLike(a.role) === 'cop';
-    const mats = [];
-    const bodyMat = new THREE.MeshLambertMaterial({ color: isCop ? COL.copBody : COL.thiefBody });
-    const darkMat = new THREE.MeshLambertMaterial({ color: isCop ? COL.copDark : COL.thiefDark });
-    const skinMat = new THREE.MeshLambertMaterial({ color: COL.skin });
-    mats.push(bodyMat, darkMat, skinMat);
+    const g = new THREE.Group();
+    const mat = (color, opts = {}) => new THREE.MeshLambertMaterial({ color, ...opts });
+    const flat = (color) => new THREE.MeshBasicMaterial({ color });
+    const parts = {};
 
-    const legL = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.5, 0.28), darkMat);
-    legL.position.set(-0.19, 0.25, 0);
-    const legR = legL.clone();
-    legR.position.x = 0.19;
+    const skinMat = mat(COL.skin);
+    const shoeMat = mat(0x191b23);
 
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.82, 0.56), bodyMat);
-    body.position.y = 0.92;
+    // ---- 脚（股関節を軸に振る） ----
+    for (const side of [-1, 1]) {
+      const hip = new THREE.Group();
+      hip.position.set(side * 0.15, 0.66, 0);
+      const leg = new THREE.Mesh(
+        new THREE.BoxGeometry(0.22, 0.54, 0.24),
+        mat(isCop ? 0x16234a : 0x22252f),
+      );
+      leg.position.y = -0.27;
+      const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.12, 0.34), shoeMat);
+      shoe.position.set(0, -0.6, 0.05);
+      hip.add(leg, shoe);
+      g.add(hip);
+      parts[side < 0 ? 'legL' : 'legR'] = hip;
+    }
 
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.58, 0.58), skinMat);
-    head.position.y = 1.64;
+    // ---- 胴体 ----
+    const torsoMat = isCop
+      ? mat(COL.copBody)
+      : new THREE.MeshLambertMaterial({ map: stripeTexture() });
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.58, 0.36), torsoMat);
+    torso.position.y = 0.95;
+    g.add(torso);
 
-    const parts = { legL, legR, body, head };
+    // 首
+    const neck = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.16), skinMat);
+    neck.position.y = 1.27;
+    g.add(neck);
+
+    // 頭
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.38), skinMat);
+    head.position.y = 1.47;
+    g.add(head);
+
+    // 目（警官・泥棒とも、正面から表情が分かるように）
+    for (const side of [-1, 1]) {
+      const eye = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.06, 0.02), flat(0xffffff));
+      eye.position.set(side * 0.09, 1.53, 0.195);
+      const pupil = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.045, 0.02), flat(0x14161d));
+      pupil.position.set(side * 0.09, 1.53, 0.21);
+      g.add(eye, pupil);
+    }
+
+    // ---- 腕（肩を軸に振る） ----
+    for (const side of [-1, 1]) {
+      const shoulder = new THREE.Group();
+      shoulder.position.set(side * 0.36, 1.18, 0);
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.44, 0.16), torsoMat);
+      arm.position.y = -0.23;
+      const hand = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, 0.14), skinMat);
+      hand.position.y = -0.47;
+      shoulder.add(arm, hand);
+      g.add(shoulder);
+      parts[side < 0 ? 'armL' : 'armR'] = shoulder;
+    }
 
     if (isCop) {
-      const cap = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.2, 0.64), darkMat);
-      cap.position.y = 1.98;
-      const brim = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.08, 0.3), darkMat);
-      brim.position.set(0, 1.9, 0.42);
-      const badge = new THREE.Mesh(
-        new THREE.BoxGeometry(0.2, 0.2, 0.06),
-        new THREE.MeshBasicMaterial({ color: COL.gold }),
+      // 胸のシャツ（明るい青）＋反射帯
+      const shirt = new THREE.Mesh(
+        new THREE.BoxGeometry(0.3, 0.26, 0.03),
+        mat(0x7fb0f0, { emissive: 0x0b1f4a, emissiveIntensity: 0.3 }),
       );
-      badge.position.set(-0.2, 1.02, 0.31);
-      // パトランプ（赤青）
-      const lampR = new THREE.Mesh(
-        new THREE.BoxGeometry(0.16, 0.12, 0.16),
-        new THREE.MeshBasicMaterial({ color: COL.red }),
+      shirt.position.set(0, 1.09, 0.185);
+      const band = new THREE.Mesh(
+        new THREE.BoxGeometry(0.62, 0.05, 0.38),
+        flat(0xd8e8ff),
       );
-      lampR.position.set(-0.14, 2.12, 0);
-      const lampB = new THREE.Mesh(
-        new THREE.BoxGeometry(0.16, 0.12, 0.16),
-        new THREE.MeshBasicMaterial({ color: 0x4cc2ff }),
+      band.position.y = 1.18;
+      // ベルト＋金のバックル
+      const belt = new THREE.Mesh(new THREE.BoxGeometry(0.63, 0.1, 0.39), mat(0x141824));
+      belt.position.y = 0.73;
+      const buckle = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.09, 0.04), flat(COL.gold));
+      buckle.position.set(0, 0.73, 0.2);
+      // 肩章（金）
+      for (const side of [-1, 1]) {
+        const ep = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.19), flat(COL.gold));
+        ep.position.set(side * 0.26, 1.265, 0);
+        g.add(ep);
+      }
+      // 胸の金バッジ
+      const badge = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 0.02, 6), flat(COL.gold));
+      badge.rotation.x = Math.PI / 2;
+      badge.position.set(-0.14, 1.1, 0.2);
+      g.add(shirt, band, belt, buckle, badge);
+
+      // 制帽：クラウン＋天板＋つば＋金帯＋帽章
+      const capCrown = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.25, 0.27, 0.17, 18),
+        mat(COL.copDark),
       );
-      lampB.position.set(0.14, 2.12, 0);
-      g.add(cap, brim, badge, lampR, lampB);
+      capCrown.position.y = 1.75;
+      const capTop = new THREE.Mesh(new THREE.CylinderGeometry(0.29, 0.27, 0.05, 18), mat(COL.copDark));
+      capTop.position.y = 1.855;
+      const capBand = new THREE.Mesh(new THREE.CylinderGeometry(0.262, 0.272, 0.045, 18), flat(COL.gold));
+      capBand.position.y = 1.685;
+      const visor = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.045, 0.26), mat(0x0d1730));
+      visor.position.set(0, 1.655, 0.245);
+      visor.rotation.x = 0.24;
+      const capBadge = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.03), flat(COL.gold));
+      capBadge.position.set(0, 1.755, 0.25);
+      g.add(capCrown, capTop, capBand, visor, capBadge);
+
+      // パトランプ（赤・青）— 常に点滅
+      const lampR = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), flat(COL.red));
+      lampR.position.set(-0.11, 1.915, 0);
+      const lampB = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), flat(0x4cc2ff));
+      lampB.position.set(0.11, 1.915, 0);
+      g.add(lampR, lampB);
       parts.lampR = lampR;
       parts.lampB = lampB;
     } else {
-      const mask = new THREE.Mesh(
-        new THREE.BoxGeometry(0.64, 0.2, 0.6),
-        new THREE.MeshLambertMaterial({ color: COL.mask }),
-      );
-      mask.position.y = 1.56;
-      const beanie = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.22, 0.62), darkMat);
-      beanie.position.y = 2.0;
-      const bag = new THREE.Mesh(
-        new THREE.BoxGeometry(0.5, 0.56, 0.3),
-        new THREE.MeshLambertMaterial({ color: COL.bag }),
-      );
-      bag.position.set(0, 0.95, -0.42);
-      g.add(mask, beanie, bag);
-      parts.bag = bag;
+      // 黒×白ボーダーの胴に、黒のベルト
+      const belt = new THREE.Mesh(new THREE.BoxGeometry(0.63, 0.1, 0.39), mat(0x14161d));
+      belt.position.y = 0.73;
+      const pouch = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.16, 0.1), mat(0x3a3742));
+      pouch.position.set(0.22, 0.7, 0.2);
+      g.add(belt, pouch);
+
+      // 目出しマスク（黒）— 目の白はマスクの上に重ねる
+      const mask = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.13, 0.4), mat(COL.mask));
+      mask.position.y = 1.535;
+      for (const side of [-1, 1]) {
+        const eye = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.07, 0.02), flat(0xffffff));
+        eye.position.set(side * 0.09, 1.535, 0.205);
+        const pupil = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.05, 0.02), flat(0x11131a));
+        pupil.position.set(side * 0.09, 1.535, 0.22);
+        g.add(eye, pupil);
+      }
+      g.add(mask);
+
+      // 赤いニット帽（白い折り返し＋ポンポン）
+      const beanie = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.235, 0.17, 16), mat(COL.beanie));
+      beanie.position.y = 1.75;
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.245, 0.245, 0.08, 16), mat(0xf1f3f8));
+      brim.position.y = 1.68;
+      const pom = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), mat(0xf1f3f8));
+      pom.position.y = 1.87;
+      g.add(beanie, brim, pom);
+
+      // 背中のお宝袋（唐草風の紐＋金貨）
+      const sack = new THREE.Mesh(new THREE.IcosahedronGeometry(0.28, 1), mat(0x34313c));
+      sack.scale.set(1, 1.12, 0.85);
+      sack.position.set(0, 0.98, -0.34);
+      const tie = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.1, 8), flat(COL.gold));
+      tie.position.set(0, 1.24, -0.34);
+      const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.02, 8), flat(COL.gold));
+      coin.rotation.x = Math.PI / 2;
+      coin.position.set(0.16, 0.95, -0.5);
+      g.add(sack, tie, coin);
     }
 
+    // ---- お宝を運搬中は背中に光る宝箱 ----
+    const carry = new THREE.Group();
+    const chest = new THREE.Mesh(
+      new THREE.BoxGeometry(0.44, 0.36, 0.3),
+      new THREE.MeshLambertMaterial({
+        color: COL.gold,
+        emissive: 0x8a5200,
+        emissiveIntensity: 0.7,
+      }),
+    );
+    const lid = new THREE.Mesh(
+      new THREE.BoxGeometry(0.48, 0.09, 0.33),
+      new THREE.MeshLambertMaterial({ color: COL.goldDark, emissive: 0x5a3500, emissiveIntensity: 0.6 }),
+    );
+    lid.position.y = 0.22;
+    const glow = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: glowTexture('rgba(255,214,90,0.95)', 'rgba(255,190,40,0)'),
+        transparent: true,
+        depthWrite: false,
+        opacity: 0.85,
+      }),
+    );
+    glow.scale.set(1.15, 1.15, 1);
+    glow.material.blending = THREE.AdditiveBlending;
+    carry.add(chest, lid, glow);
+    carry.position.set(0, 1.1, -0.46);
+    carry.visible = false;
+    g.add(carry);
+
+    // 足元の影
     const shadow = new THREE.Mesh(
-      new THREE.CircleGeometry(0.55, 16),
+      new THREE.CircleGeometry(0.5, 18),
       new THREE.MeshBasicMaterial({ color: 0x0d1a10, transparent: true, opacity: 0.2 }),
     );
     shadow.rotation.x = -Math.PI / 2;
     shadow.position.y = 0.07;
 
-    const carry = new THREE.Mesh(
-      new THREE.BoxGeometry(0.66, 0.66, 0.66),
-      new THREE.MeshLambertMaterial({ color: COL.gold, emissive: 0x6b4a00, emissiveIntensity: 0.45 }),
-    );
-    carry.position.set(0, 2.45, 0);
-    carry.visible = false;
-
     // 正体発覚マーク
     const alert = new THREE.Sprite(makeLabel('!', '#ffffff', 'rgba(214,40,40,0.96)', 120));
-    alert.scale.set(1.5, 1.5, 1);
-    alert.position.set(0, 3.4, 0);
+    alert.scale.set(1.4, 1.4, 1);
+    alert.position.set(0, 2.5, 0);
     alert.visible = false;
 
-    g.add(legL, legR, body, head, shadow, carry, alert);
-    g.userData = { parts, carry, alert, look: isCop ? 'cop' : 'thief', mats };
+    g.add(shadow, alert);
+
+    g.userData = {
+      parts,
+      carry,
+      alert,
+      look: isCop ? 'cop' : 'thief',
+      mats: collectMats(g),
+    };
     g.position.set(a.x, 0, a.z);
     this.characterRoot.add(g);
     return g;
@@ -829,19 +1018,30 @@ export class World {
       g.position.set(a.x, 0, a.z);
       g.rotation.y = a.dir;
       const parts = g.userData.parts;
-      const bob = a.moving ? Math.sin(this.t * 12 + a.id) * 0.06 : Math.sin(this.t * 2.2 + a.id) * 0.015;
-      g.position.y = Math.abs(bob) * 0.8;
-      if (parts.legL) parts.legL.rotation.x = a.moving ? Math.sin(this.t * 12 + a.id) * 0.7 : 0;
-      if (parts.legR) parts.legR.rotation.x = a.moving ? -Math.sin(this.t * 12 + a.id) * 0.7 : 0;
-      if (parts.lampR && parts.lampB && a.isPlayer) {
-        const on = Math.sin(this.t * 6) > 0;
-        parts.lampR.material.color.setHex(on ? COL.red : 0x5a1a18);
-        parts.lampB.material.color.setHex(on ? 0x1a2a5a : 0x4cc2ff);
+      const swing = a.moving ? Math.sin(this.t * 11 + a.id) * 0.62 : 0;
+      const bob = a.moving
+        ? Math.sin(this.t * 22 + a.id) * 0.05
+        : Math.sin(this.t * 2.2 + a.id) * 0.012;
+      g.position.y = Math.abs(bob);
+      if (parts.legL) parts.legL.rotation.x = swing;
+      if (parts.legR) parts.legR.rotation.x = -swing;
+      if (parts.armL) parts.armL.rotation.x = -swing * 0.8;
+      if (parts.armR) parts.armR.rotation.x = swing * 0.8;
+      if (parts.lampR && parts.lampB) {
+        const on = Math.sin(this.t * (a.isPlayer ? 7 : 5) + a.id) > 0;
+        parts.lampR.material.color.setHex(on ? COL.red : 0x5c1b18);
+        parts.lampB.material.color.setHex(on ? 0x16264f : 0x4cc2ff);
       }
       const jailed = a.state === 'jailed';
       g.rotation.z = jailed ? 0.12 : 0;
-      g.userData.carry.visible = a.carrying != null;
-      if (a.carrying != null) g.userData.carry.rotation.y += dt * 2;
+      const carry = g.userData.carry;
+      carry.visible = a.carrying != null;
+      if (a.carrying != null) {
+        carry.rotation.y += dt * 1.1;
+        carry.position.y = 1.1 + Math.sin(this.t * 5 + a.id) * 0.04;
+        const halo = carry.children[2];
+        if (halo?.material) halo.material.opacity = 0.62 + Math.sin(this.t * 6 + a.id) * 0.22;
+      }
       g.userData.alert.visible = !!a.exposed;
       g.scale.setScalar(jailed ? 0.92 : 1);
 
@@ -915,6 +1115,49 @@ export class World {
       }
     });
 
+    // 捜索の波紋（足元から広がるリング）
+    const searches = (game.effects || []).filter((e) => e.type === 'search');
+    while (this.searchMeshes.length < searches.length) {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.78, 1, 48),
+        new THREE.MeshBasicMaterial({
+          color: 0xa8ecff,
+          transparent: true,
+          opacity: 0.85,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        }),
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.12;
+      this.fxRoot.add(ring);
+      this.searchMeshes.push(ring);
+    }
+    this.searchMeshes.forEach((mesh, i) => {
+      const e = searches[i];
+      mesh.visible = !!e;
+      if (!e) return;
+      const k = Math.min(1, e.age / e.ttl);
+      const ease = 1 - Math.pow(1 - k, 3);
+      mesh.position.set(e.x, 0.12, e.z);
+      mesh.scale.setScalar(Math.max(0.25, e.radius * ease));
+      mesh.material.opacity = 0.85 * (1 - k);
+      mesh.rotation.z += dt * 0.5;
+    });
+
+    // プレイヤーが茂みに隠れている間は、その茂みを透かして自分の位置を見せる
+    if (this.bushMats) {
+      const p = game.player;
+      for (let i = 0; i < this.bushMeshes.length; i++) {
+        const b = MAP.bushes[i];
+        const inside = p && p.hidden && Math.hypot(p.x - b.x, p.z - b.z) < b.r + 1.0;
+        const opacity = inside ? 0.42 : 1;
+        const entry = this.bushMats[i];
+        if (entry.mat.opacity !== opacity) entry.mat.opacity = opacity;
+        entry.mat.depthWrite = opacity >= 1;
+      }
+    }
+
     // プレイヤーリング
     if (player) {
       if (!this.playerRing) {
@@ -941,6 +1184,12 @@ export class World {
   }
 
   cameraPose(player) {
+    // キャラ図鑑用の固定カメラ（スクリーンショット用 ?chars=1）
+    if (this.view === 'chars') {
+      const f = this.charFocus || { x: 0, z: 20 };
+      const focus = new THREE.Vector3(f.x, 1.05, f.z);
+      return { focus, desired: focus.clone().add(new THREE.Vector3(0, 1.45, 7.0)), follow: false, overview: false };
+    }
     const follow = this.view === 'follow';
     const overview = this.view === 'map';
     const focus = follow

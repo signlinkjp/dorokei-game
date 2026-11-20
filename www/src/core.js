@@ -9,6 +9,10 @@
 //  - 警察側スパイ（内通者）は牢屋を解錠できる。泥棒側スパイ（密告者）は運ばれたお宝を隠し戻せる。
 //  - 解錠中を他の警察に、お宝の隠し戻し中を他の泥棒に近くで見られると正体発覚。
 //    発覚後は元の陣営からも捕まえて牢屋へ送れる。
+//  - Build 2: 茂みに隠れられるのは1回 最大5秒（解除後3秒のクールタイム）とし、
+//    警察は茂みの近くで「捜索」して波紋で炙り出せるようにした。
+
+import { DEFAULT_STAGE, isStagePlayable } from './stages.js';
 
 export const ROLE = Object.freeze({
   COP: 'cop',
@@ -62,6 +66,12 @@ export const CFG = Object.freeze({
   unlockCooldown: 5.0,
   hideReveal: 3.2, // 隠れている泥棒が見つかる距離
   hideRange: 1.2, // 茂みに隠れられる距離（中心から+半径）
+  hideMax: 5, // 1回の隠れは最大5秒（トモアキさん指定）
+  hideCooldown: 3, // 解除後3秒は隠れ直せない（同）
+  searchRange: 5.5, // 警察が「捜索」できる茂みまでの距離
+  searchRadius: 4.5, // 捜索の波紋が届き、隠れている泥棒を炙り出す距離
+  searchCooldown: 1.6, // 連打しすぎないための短いクールタイム
+  durations: [180, 300, 420], // 設定で選べる制限時間（3分/5分/7分）
   returnRange: 5.0, // 脱出ゲート前でお宝を隠し戻せる距離
   bushDodge: 4.5, // 泥棒が茂みへ逃げ込む距離
 });
@@ -524,6 +534,10 @@ export function assignRoles(opts = {}) {
 export class Game {
   constructor(opts = {}) {
     this.cfg = { ...CFG, ...(opts.cfg || {}) };
+    this.stage = opts.stage ?? DEFAULT_STAGE;
+    if (!isStagePlayable(this.stage)) {
+      throw new Error(`DOROKEI: 遊べないステージです (${this.stage})`);
+    }
     this.seed = opts.seed ?? 20261121;
     this.rng = mulberry32(this.seed);
     this.autoplay = !!opts.autoplay;
@@ -534,6 +548,7 @@ export class Game {
     this.time = this.cfg.duration;
     this.events = [];
     this.pings = [];
+    this.effects = []; // 捜索の波紋などの見た目用エフェクト
     this.stats = {
       arrests: 0,
       rescues: 0,
@@ -543,6 +558,7 @@ export class Game {
       exposures: 0,
       returns: 0,
       hides: 0,
+      searches: 0,
     };
     this.input = { x: 0, z: 0, action: false };
 
@@ -581,6 +597,9 @@ export class Game {
         state: 'free',
         carrying: null,
         hidden: false,
+        hideLeft: 0, // この隠れの残り秒数（最大 cfg.hideMax）
+        hideCd: 0, // 解除後のクールタイム
+        searchCd: 0, // 警察の捜索クールタイム
         arrestCd: 0,
         immune: 0,
         actionT: 0,
@@ -643,7 +662,7 @@ export class Game {
     this.input.z = z || 0;
   }
 
-  /** ボタンを押した瞬間の即時アクション（密告・隠れる） */
+  /** ボタンを押した瞬間の即時アクション（密告・隠れる・捜索） */
   setAction(down) {
     const wasDown = this.input.action;
     this.input.action = !!down;
@@ -654,6 +673,8 @@ export class Game {
     if (p.looks === 'thief') {
       if (p.hidden) this.unhide(p);
       else this.hide(p);
+    } else if (p.looks === 'cop' && !p.isSpy) {
+      this.search(p);
     }
   }
 
@@ -674,6 +695,21 @@ export class Game {
       }
     }
     return best;
+  }
+
+  /** 中心距離で一番近い茂み（捜索の可否判定用） */
+  nearestBush(a, range = Infinity) {
+    let index = -1;
+    let distTo = Infinity;
+    for (let i = 0; i < MAP.bushes.length; i++) {
+      const b = MAP.bushes[i];
+      const d = Math.hypot(b.x - a.x, b.z - a.z);
+      if (d <= range && d < distTo) {
+        distTo = d;
+        index = i;
+      }
+    }
+    return { index, dist: distTo };
   }
 
   nearest(from, pred, max = Infinity) {
@@ -805,10 +841,12 @@ export class Game {
     if (this.phase !== 'playing') return false;
     if (agent.state !== 'free' || agent.looks !== 'thief') return false;
     if (agent.carrying != null) return false;
+    if (agent.hidden) return false;
+    if (agent.hideCd > 0) return false; // 解除後のクールタイム中
     const b = this.bushAt(agent);
     if (b < 0) return false;
-    if (agent.hidden) return false;
     agent.hidden = true;
+    agent.hideLeft = this.cfg.hideMax;
     agent.actionT = 0;
     agent.path = null;
     this.stats.hides++;
@@ -816,11 +854,86 @@ export class Game {
     return true;
   }
 
-  unhide(agent) {
+  /**
+   * 隠れ解除。reason 'timeout' のときだけ「隠れ続けられなかった」演出を出す。
+   * 解除後は必ずクールタイム（cfg.hideCooldown）が入る。
+   */
+  unhide(agent, reason = 'manual') {
     if (!agent.hidden) return false;
     agent.hidden = false;
-    agent.ai.hideCd = 2.5;
+    agent.hideLeft = 0;
+    agent.hideCd = this.cfg.hideCooldown;
+    agent.ai.hideCd = Math.max(agent.ai.hideCd, 1.5);
+    if (reason === 'timeout') {
+      this.pushEvent({
+        type: 'unhide',
+        by: agent.id,
+        reason,
+        label: `${agent.name}が隠れ続けられず姿を現した`,
+      });
+    }
     return true;
+  }
+
+  // ---- 警察の「捜索」 -----------------------------------------------------
+  /** 茂みの近くにいて、まだ捜索できる状態か */
+  canSearch(agent) {
+    if (this.phase !== 'playing') return false;
+    if (!agent || agent.state !== 'free') return false;
+    if (agent.looks !== 'cop') return false;
+    if (agent.isSpy) return false; // スパイは捕まえる側に回らない
+    if (agent.searchCd > 0) return false;
+    return this.nearestBush(agent, this.cfg.searchRange).index >= 0;
+  }
+
+  /**
+   * 足元から波紋を広げ、cfg.searchRadius 以内に隠れている泥棒を炙り出して確保する。
+   * 隠れていない泥棒には効かない（近づいて捕まえる）。
+   */
+  search(agent) {
+    if (!this.canSearch(agent)) return { ok: false, revealed: 0, arrested: null };
+    agent.searchCd = this.cfg.searchCooldown;
+    this.stats.searches++;
+    this.effects.push({
+      type: 'search',
+      x: agent.x,
+      z: agent.z,
+      age: 0,
+      ttl: 0.75,
+      radius: this.cfg.searchRadius,
+    });
+
+    const found = [];
+    for (const o of this.agents) {
+      if (o === agent || !o.hidden || o.looks !== 'thief') continue;
+      if (dist(agent, o) > this.cfg.searchRadius) continue;
+      found.push(o);
+    }
+
+    let arrested = null;
+    for (const o of found) {
+      o.hidden = false;
+      o.hideLeft = 0;
+      o.hideCd = this.cfg.hideCooldown;
+      if (agent.arrestCd <= 0 && this.canArrest(agent, o) && this.arrest(agent, o)) {
+        arrested = o;
+      }
+    }
+
+    this.pushEvent({
+      type: 'search',
+      by: agent.id,
+      count: found.length,
+      label: found.length
+        ? `🔍 捜索で${found.length}人を発見${arrested ? '・確保!' : ''}`
+        : '🔍 捜索（反応なし）',
+    });
+    return { ok: true, revealed: found.length, arrested: arrested ? arrested.id : null };
+  }
+
+  updateEffects(dt) {
+    for (const e of this.effects) e.age += dt;
+    this.effects = this.effects.filter((e) => e.age < e.ttl);
   }
 
   pickup(agent, treasure) {
@@ -956,12 +1069,14 @@ export class Game {
     dt = Math.min(Math.max(dt, 0), 0.1);
     if (this.phase !== 'playing') {
       this.updatePings(dt);
+      this.updateEffects(dt);
       return;
     }
     this.t += dt;
     this.time = Math.max(0, this.time - dt);
     for (const a of this.agents) this.tickAgent(a, dt);
     this.updatePings(dt);
+    this.updateEffects(dt);
     this.checkWin();
   }
 
@@ -981,8 +1096,16 @@ export class Game {
     a.arrestCd = Math.max(0, a.arrestCd - dt);
     a.whistleCd = Math.max(0, a.whistleCd - dt);
     a.unlockCd = Math.max(0, a.unlockCd - dt);
+    a.hideCd = Math.max(0, a.hideCd - dt);
+    a.searchCd = Math.max(0, a.searchCd - dt);
     a.ai.hideCd = Math.max(0, a.ai.hideCd - dt);
     a.pathAge += dt;
+
+    // 隠れ続けられるのは最大 cfg.hideMax 秒
+    if (a.hidden) {
+      a.hideLeft = Math.max(0, a.hideLeft - dt);
+      if (a.hideLeft <= 0) this.unhide(a, 'timeout');
+    }
 
     const playerCtl = a.isPlayer && !this.autoplay;
     let mx = 0;
@@ -1172,6 +1295,10 @@ export class Game {
         target = { x: ping.x, z: ping.z };
       } else {
         target = this.patrolPoint(a);
+        // 茂みのそばを通ったら捜索して、隠れている泥棒を炙り出す
+        if (a.searchCd <= 0 && this.nearestBush(a, this.cfg.searchRange - 0.8).index >= 0) {
+          if (this.rng() < dt * 1.4) this.search(a);
+        }
       }
     } else if (a.role === ROLE.COP_SPY) {
       // 内通者: 誰も見ていない隙に牢屋を解錠する
@@ -1217,7 +1344,7 @@ export class Game {
           const bush = MAP.bushes[b];
           target = bush;
           if (Math.hypot(bush.x - a.x, bush.z - a.z) < bush.r && this.hide(a)) {
-            a.ai.hideFor = 3.5 + this.rng() * 2.5;
+            a.ai.hideFor = Math.min(this.cfg.hideMax - 1.2, 2.2 + this.rng() * 1.6);
           }
         } else {
           target = this.fleePoint(a, copNear.agent);
@@ -1268,7 +1395,7 @@ export class Game {
           const bush = MAP.bushes[b];
           target = bush;
           if (Math.hypot(bush.x - a.x, bush.z - a.z) < bush.r && this.hide(a)) {
-            a.ai.hideFor = 3 + this.rng() * 2;
+            a.ai.hideFor = Math.min(this.cfg.hideMax - 1.2, 2 + this.rng() * 1.4);
           }
         } else {
           target = { x: a.x + (a.x - copNear.agent.x) * 2, z: a.z + (a.z - copNear.agent.z) * 2 };
@@ -1354,6 +1481,7 @@ export class Game {
     this.reason = reason;
     this.pushEvent({
       type: 'end',
+      winner,
       label: winner === 'cops' ? '警察陣営の勝利' : '泥棒陣営の勝利',
     });
   }

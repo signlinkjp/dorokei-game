@@ -1,4 +1,4 @@
-# DOROKEI — ドロケー × 人狼（広い街・新ルール・iOS）
+# DOROKEI — ドロケー × 人狼（Build 2：キャラ刷新・音・茂み5秒・捜索・UI整備・iOS）
 
 警官と泥棒の鬼ごっこ（ドロケー）に、人狼の「スパイ」を混ぜた 3D アクション。
 HTML/CSS/JS + Three.js（CDN 不使用・`www/vendor/three.module.js` に同梱）だけで動き、
@@ -9,12 +9,34 @@ Capacitor の iOS シェル（`ios/`）でそのままアプリになります�
 - 右上に **ミニマップ（レーダー）**、左下バーチャルスティック、右下の文脈アクションボタン
 - お宝は **10箇所の候補から5個** をランダム配置（捕まった時・奪い返された時は別の場所へ隠し戻し）
 
+## Build 2 で入ったもの（トモアキさんの実機フィードバック反映）
+
+1. **世界基準のキャラクター**
+   - 警察：紺のポリスユニフォーム＋金の肩章・胸バッジ＋つば付き制帽（金帯・帽章）＋赤青のパトライト
+   - 泥棒：黒×白ボーダー＋目出しマスク＋**赤いニット帽**（白の折り返し＋ポンポン）＋背中のお宝袋。
+     お宝を運ぶと**背中の宝箱が金色に光る**。色もシルエット（制帽のつば／ニット帽＋袋）も別物
+2. **茂みに隠れる秒数制限**：1回 **最大5秒**（残り秒数のゲージ表示）＋解除後 **クールタイム3秒**
+3. **警察の「捜索」**：茂みの**5.5m以内**で右下ボタンが金色の「🔍 捜索」に変わり、押すと足元から
+   サーチ波紋が広がって**4.5m以内の隠れている泥棒を即・炙り出して確保**（自動で3.2mまで近づいても見つかる）
+4. **効果音＆BGM（Web Audio API 合成・音声ファイルなし／完全オフライン）**
+   開始・お宝ゲット・ゲート納品・泥棒確保（サイレン風）・牢屋解錠・お宝隠し戻し・スパイ発覚（警告音）・
+   茂み隠れ／捜索・ボタンタップ・勝利／敗北ジングル・軽快なチェイスBGM。
+   タイトル設定とゲーム中HUD（🔊）でサウンドON/OFF
+5. **ステージ整理＆UI整備**
+   - 今の街を基本ステージ **`City`** として登録。建物ラベルは控えめな街の景観に。
+     タイトルに**ステージ選択枠**（City＋「🏛️ 美術館」「廃校」「地下鉄」「港」の Coming Soon）
+   - **あそびかた**（操作説明＋ルール図解）、**設定**（制限時間3分/5分/7分・サウンドON/OFF・
+     言語14種〈日本語・英語＋12言語の土台〉）、**プライバシーポリシー** をタイトルから即オープン
+6. **Build 2 として配信**：`CURRENT_PROJECT_VERSION = 2`。ワークフローの `BUILD_NUMBER = 2` 版は
+   `docs/ios-testflight-build2.yml` に用意（GitHub連携の権限ではワークフローファイルを更新できないため、
+   Build 1 と同じく Safari で貼り付けてもらう）
+
 ## 起動
 
 ```bash
 cd /workspace/work/dorokei-game
-PATH=/workspace/tools-node/node-v20.18.0-linux-x64/bin:$PATH npm test   # ルールのユニットテスト
-PATH=/workspace/tools-node/node-v20.18.0-linux-x64/bin:$PATH npm run serve   # http://127.0.0.1:8899/
+PATH=/workspace/.tools/node22/bin:$PATH npm test        # ルール＋Build 2のユニットテスト（40本）
+PATH=/workspace/.tools/node22/bin:$PATH npm run serve   # http://127.0.0.1:8899/
 ```
 
 `www/` をそのまま Capacitor の `webDir` に指定しています（相対パス・ES Modules のみ、外部通信なし）。
@@ -28,93 +50,145 @@ PATH=/workspace/tools-node/node-v20.18.0-linux-x64/bin:$PATH npm run serve   # h
 | `seed=7` | | 乱数シード（役割・お宝の配置・AIの動きが再現） |
 | `team=cop\|thief` | | プレイヤーの希望陣営 |
 | `spy=both\|cops\|thieves\|none` | | スパイ設定 |
+| `duration=180` | | 制限時間（秒） |
 | `view=top` | | 自分中心の俯瞰で開始 |
 | `view=map` | | 街全体を見渡すカメラで開始（スクリーンショット用） |
 | `hud=0` | | HUDを隠す |
+| `chars=1` | | 警官と泥棒のキャラ図鑑カメラ（撮影用・`carry=1`／`back=1` 併用） |
 
 ## ルール（最新仕様）
 
 | 役 | 見た目 | 本当の陣営 | できること |
 |---|---|---|---|
-| 警察 COP | 青い制服・帽子・パトランプ | 警察 | 泥棒に触れると確保（クールダウン4秒）。牢屋へ収容。アクション長押しでダッシュ |
+| 警察 COP | 紺のポリス服・制帽・赤青ランプ | 警察 | 泥棒に触れると確保（クールダウン4秒）。牢屋へ収容。茂みの近くで **🔍 捜索**。ボタン長押しでダッシュ |
 | 内通者 COP SPY | 警官のフリ | **泥棒** | 牢屋の前で1.5秒長押し＝解錠して脱獄させる。警官に7.5m以内で見られると正体発覚 |
-| 泥棒 THIEF | 黒マスク・バッグ | 泥棒 | お宝を回収→脱出ゲートへ。牢屋の前で1.5秒長押し＝仲間を救出。茂みに隠れる |
+| 泥棒 THIEF | ボーダー・目出し・赤ニット帽 | 泥棒 | お宝を回収→脱出ゲートへ。牢屋の前で1.5秒長押し＝仲間を救出。茂みに**最大5秒**隠れる |
 | 密告者 THIEF SPY | 泥棒のフリ | **警察** | ボタンで近く（11m以内）の泥棒を警察へ密告ピン。ゲート前で1.5秒長押し＝運ばれたお宝を隠し戻す。泥棒に見られると発覚 |
 
 **勝利条件**
 
-- **警察陣営**：泥棒を全員牢屋に入れる／時間切れ（300秒）でお宝を**1つでも守りきる**（＝泥棒が5個すべて運べていない）
+- **警察陣営**：泥棒を全員牢屋に入れる／時間切れ（既定300秒、設定で3分・5分・7分）でお宝を**1つでも守りきる**
 - **泥棒陣営**：お宝**5個すべて**を脱出ゲートへ運ぶ
 
-**新ルールの細部**
+**細部**
 
 - **お宝運搬中の速度低下**：通常 6.8 m/s → 運搬中 **5.4 m/s**（警官 6.4 m/s・ダッシュ時 ×1.3）
 - **お宝を持ったまま捕まった場合**：泥棒は牢屋へ、お宝は街の候補スポットへ**ランダムに隠し戻される**
-- **隠れる**：茂みの中でアクション → 半透明になり、3.2m まで近づかれないと見つからない（動くと解除／お宝持ちは不可）
+- **隠れる**：茂みの中でアクション → 半透明になり、3.2m まで近づかれないと見つからない。
+  **1回5秒まで**（残りゲージ表示）、解除後**3秒**は隠れ直せない。動くと解除／お宝持ちは不可。
+  隠れている間は自分が入っている茂みが透けて自分の位置が見える
+- **捜索**：警察が茂みの**5.5m以内**にいるとボタンが「🔍 捜索」に光る。押すと足元から波紋が広がり、
+  **4.5m以内**の隠れている泥棒を炙り出して確保。クールタイム1.6秒（CPU警官も捜索する）
 - **警察側スパイの解錠**：牢屋前で1.5秒。**他の警察に7.5m以内で見られると正体発覚**
 - **泥棒側スパイの奪い返し**：ゲート前で1.5秒。**他の泥棒に7.5m以内で見られると正体発覚**
-- **正体発覚後**：元の陣営（内通者なら警察、密告者なら泥棒）からも捕まえて牢屋へ送れる。牢屋に入れば本当の味方が救出できる
-- **スパイ自身は捕まえる側に回れない**（正体を隠しているため）
+- **正体発覚後**：元の陣営（内通者なら警察、密告者なら泥棒）からも捕まえて牢屋へ送れる
+- **スパイ自身は捕まえる側に回れない**（捜索も不可。正体を隠しているため）
 
-タイトルで「あなたの役（おまかせ／警察／泥棒）」「スパイ設定（両方／警察のみ／泥棒のみ／なし）」
-「自分がスパイ（ランダム／必ず／なし）」を選べます。
+タイトルで「ステージ」「あなたの役（おまかせ／警察／泥棒）」「スパイ設定（両方／警察のみ／泥棒のみ／なし）」
+「自分がスパイ（ランダム／必ず／なし）」を選べます。設定は端末内（localStorage）に保存されます。
 
 ## 操作
 
 | 操作 | スマホ | PC |
 |---|---|---|
 | 移動 | 左下スティックをドラッグ | WASD / 矢印キー |
-| アクション | 右下ボタン（長押しで解錠・救出・奪い返し／泥棒は茂みで隠れる） | Space |
+| アクション | 右下ボタン（泥棒=隠れる／警察=捜索・ダッシュ／長押しで解錠・救出・奪い返し） | Space |
 | 視点切替 | 左上「俯瞰／通常」 | V |
+| サウンドON/OFF | HUD右上の 🔊 | 設定モーダル |
+
+## ステージ構成（次のビルドへの土台）
+
+`www/src/stages.js` がステージ台帳です。Build 2 では `City`（`available: true`）だけが遊べ、
+美術館・廃校・地下鉄・港は「Coming Soon」としてタイトルに並びます。追加するときは
+`STAGES` に1件足し、`available: true` と街データ（建物・ギミック）を用意します。
+`Game({ stage: '<id>' })` は遊べないIDを受け取ると例外にするので、未実装ステージが
+混ざることはありません。
+
+## 音（Web Audio API）
+
+`www/src/audio.js` がすべての音をオシレーター＋ノイズで合成します（音声ファイル0個・外部通信なし）。
+
+- 効果音：`tap / start / pickup / deliver / arrest / unlock / rescue / hideback / expose / hide / search / whistle / win / lose`
+- BGM：138BPMの軽快なチェイスループ（Am–F–C–G、ベース＋アルペジオ＋ハイハット）
+- ゲームのイベント（`pickup` `deliver` `arrest` …）は `pickSfx()` で効果音名に変換され、
+  勝利／敗北はプレイヤーの陣営で決まります。iOS はタップで `unlock()` してから鳴らします。
+
+## 言語
+
+`www/src/i18n.js` に **14言語**（日本語・English・한국어・简体中文・繁體中文・Español・Português・
+Français・Deutsch・Italiano・Русский・ไทย・Tiếng Việt・Bahasa Indonesia）。
+日本語と英語は全文、韓国語・中国語（簡体／繁体）は主要UIを翻訳し、残りは英語へフォールバックします。
+未翻訳キーは英語→日本語の順で表示されるので、対応言語を足すときは `STRINGS` に追記するだけです。
+
+## プライバシー
+
+`docs/privacy.md`（同内容はアプリ内の「プライバシーポリシー」モーダル）。
+個人情報の収集なし・アカウントなし・広告／解析なし・外部送信なし。設定のみ端末内に保存します。
 
 ## ファイル構成
 
 ```
 www/
-  index.html            タイトル / HUD / ミニマップ / リザルト
+  index.html            タイトル / HUD / モーダル（あそびかた・設定・プライバシー）/ リザルト
   styles.css            明るいポップなUI（縦横どちらでも崩れない）
-  vendor/three.module.js  Three.js r160（同梱・オフライン動作）
-  src/core.js           コアロジック（描画非依存：役割・捕獲・牢屋・救出・解錠・隠れる・密告・奪い返し・勝敗・AI・グリッドA*）
-  src/render.js         Three.js の街・キャラ・牢屋・お宝・ゲート・カメラ
-  src/minimap.js        右上のレーダー（街の形＋お宝＋近くの相手＋自分の向き）
-  src/main.js           UI配線・入力・ゲームループ・デモモード
-test/core.test.js       ユニットテスト（node:test / 26本）
+  vendor/three.module.js  Three.js（同梱・オフライン動作）
+  src/core.js           コアロジック（描画非依存：役割・捕獲・牢屋・隠れ5秒・捜索・スパイ・勝敗・AI・A*）
+  src/render.js         Three.js の街・キャラ（警官／泥棒）・牢屋・お宝・ゲート・捜索波紋・カメラ
+  src/minimap.js        右上のレーダー
+  src/audio.js          効果音＆BGMの合成（Web Audio API）
+  src/stages.js         ステージ台帳（City＋Coming Soon）
+  src/i18n.js           14言語の文字列とDOM適用
+  src/main.js           UI配線・入力・設定の保存・モーダル・ゲームループ
+test/core.test.js       既存ルールのユニットテスト（26本）
+test/build2.test.js     Build 2のユニットテスト（14本：茂み5秒・捜索・ステージ・音・言語）
 tools/serve.mjs         依存なし静的サーバー
-tools/shot.mjs          ヘッドレスChromiumでスクリーンショット撮影
-tools/interaction-test.mjs  ブラウザ操作（移動・視点・ミニマップ・リザルト）の自動確認
+tools/shot.mjs          ヘッドレスChromiumでスクリーンショット撮影（タイトル・街・キャラ・隠れ・捜索）
+tools/interaction-test.mjs  ブラウザ操作の自動確認（モーダル・設定・隠れ・捜索・言語・リザルト）
 tools/portrait.mjs      iPhone縦持ち(390×844)のレイアウト確認
 tools/make-icons.mjs    アプリアイコン(1024)とスプラッシュ(2732)の生成
 ios/                    Capacitor iOS プロジェクト（Xcode）
-docs/ios-testflight-build1.yml  TestFlight ワークフローの下書き（Safariで .github/workflows/ へ貼る）
+docs/privacy.md         プライバシーポリシー本文
+docs/ios-testflight-build2.yml  Build 2 のワークフロー（Safariで .github/workflows/ へ上書きする用）
 ```
 
 ## テスト結果
 
-`npm test` → **26 / 26 pass**
+`npm test` → **40 / 40 pass**
 
-- 役割割り当て（既定3対5＋各陣営スパイ1、スパイ設定4種、プレイヤー希望とスパイ希望）
-- 街の広さ（150m×150m）・ランドマーク8つ以上・お宝10候補から5箇所・配置の重複なし・建物や道路の上に置かれない
-- お宝の回収・搬出・5個すべてで泥棒の勝ち／時間切れで1つでも守れば警察の勝ち（4/5の表示も確認）
-- 運搬中の速度低下（6.8 → 5.4 m/s を実測）
-- お宝持ちの捕獲 → 牢屋＋お宝が別の候補スポットへ隠し戻される
-- 隠れる／4m離れた警官には見つからない／近づけば見つかる／動くと解除／お宝持ちと警官は隠れられない
-- 内通者の解錠と発覚（見られている時だけ発覚）／未発覚は確保されない／発覚後は牢屋へ
-- 密告者の奪い返し（ゲート前1.5秒）と正体発覚・泥棒による確保／密告者はお宝を運べない
-- 密告ピンの生成・期限・クールダウン
-- グリッドA*（開始位置→ゲート・各お宝・牢屋の内外を実際に歩いて到達）
-- CPU 8人の通し対戦（120秒で破綻なし・NaNなし・建物に入らない／6シードで決着し、両陣営の勝ちが発生）
-- 同じシードなら同じ結果（再現性）
+Build 2 で追加した確認（`test/build2.test.js`）:
+
+- 茂みは1回**最大5秒**・解除後**クールタイム3秒**／残り秒数が毎フレーム減る／手動解除でもクールタイム
+- 警察は茂み5.5m以内で捜索でき、4.5m以内の隠れた泥棒を炙り出して確保／波紋エフェクト／成績に加算
+- 茂みから離れると捜索不可・4.5mより遠い隠れ泥棒には届かない・隠れていない泥棒は捜索では捕まらない
+- 捜索のクールタイム／内通者は捜索できない／波紋は約0.75秒で消える
+- ステージ台帳（Cityが基本・Coming Soonが2つ以上・遊べないIDは例外）／制限時間3・5・7分
+- 終了イベントに勝者（勝敗ジングルの判定）／効果音名とイベント対応／AudioContextなしでも落ちない
+- 14言語・全キーに ja/en が揃う・未翻訳は英語へフォールバック
+
+既存の確認（`test/core.test.js`）も全て維持：役割割り当て、街の広さ、お宝の配置・搬出・勝利条件、
+運搬中の速度低下、隠れる／発覚、内通者の解錠、密告者の奪い返し、密告ピン、A*の到達性、
+CPU 8人の通し対戦（6シードで両陣営の勝ちが発生）・再現性。
+
+ブラウザ操作（`node tools/interaction-test.mjs`）→ **INTERACTION OK**
+（ステージ枠・準備中表示・あそびかた／設定モーダル・3分設定・サウンドOFF/ON・移動・視点・
+ミニマップ・隠れ5秒→クールタイム3秒の表示・🔍 捜索で確保・リザルトの捜索成績・英語切替）
 
 ## スクリーンショット
 
-![タイトル](docs/screenshots/dorokei-title.png)
-![プレイ画面](docs/screenshots/dorokei-play.png)
+![タイトル](docs/screenshots/dorokei-title.jpg)
+![キャラクター（警官と泥棒）](docs/screenshots/dorokei-chars.jpg)
+![お宝を運ぶ泥棒（背中が光る）](docs/screenshots/dorokei-chars-back.jpg)
+![捜索の波紋](docs/screenshots/dorokei-search.jpg)
+![プレイ画面](docs/screenshots/dorokei-play.jpg)
 
-- `docs/screenshots/dorokei-title.png` … タイトル画面（パトカーの赤×青＋お宝のゴールド、明るいポップな新デザイン）
-- `docs/screenshots/dorokei-play.png` … プレイ画面（150m×150mの街全体・HUD・右上のレーダー）
+- `docs/screenshots/dorokei-title.jpg` … ステージ選択・設定・あそびかたを備えた新タイトル
+- `docs/screenshots/dorokei-chars.jpg` … 警官（紺の制服・制帽・金バッジ・パトランプ）と泥棒（ボーダー・目出し・赤ニット帽）
+- `docs/screenshots/dorokei-chars-back.jpg` … お宝を運ぶ泥棒の背中（宝箱が光る）
+- `docs/screenshots/dorokei-search.jpg` … 「🔍 捜索」の波紋と確保
+- `docs/screenshots/dorokei-play.jpg` … 150m×150mの街全体・HUD・レーダー
 - アプリアイコン：`assets/appicon-1024.png`
 
-再撮影：`node tools/shot.mjs`。縦持ちは `node tools/portrait.mjs`。
+再撮影：`node tools/shot.mjs`（`ONLY=chars,search` などで個別に）。
 ヘッドレス Chromium は `/workspace/work/dcd-b17/browsers` を使い、システムに無い libatk/libatspi は
 `.browser-libs/`（Debian の .deb を展開）から供給しています。
 
@@ -124,7 +198,7 @@ docs/ios-testflight-build1.yml  TestFlight ワークフローの下書き（Safa
 |---|---|
 | Bundle ID | `jp.signlink.Dorokei` |
 | アプリ名 | `DOROKEI` |
-| バージョン | `1.0.0`（Build `1`） |
+| バージョン | `1.0.0`（**Build 2**） |
 | 対応 | iOS 15.0 以上 / iPhone・iPad / 縦横対応 / ステータスバー非表示 |
 | 暗号化 | `ITSAppUsesNonExemptEncryption = false`（輸出コンプライアンスの質問をスキップ） |
 
@@ -133,28 +207,26 @@ npx cap sync ios     # www → ios/App/App/public を更新（要 Node 22）
 npx cap open ios     # Xcode で開く（Macのみ）
 ```
 
-アプリアイコンとスプラッシュは `node tools/make-icons.mjs` で再生成できます
-（青空×夜の街＋お宝の宝箱＋パトランプ）。
+### TestFlight 配信（Build 2）
 
-### TestFlight までの手順（トモアキさん側の操作）
+Build 番号は `2` に更新済みですが、ワークフロー本体の `BUILD_NUMBER` も `2` にする必要があります。
+GitHub連携の権限ではワークフローファイルを更新できないため、Build 1 と同じく Safari で貼り付けます。
 
-1. **Apple Developer**：Identifiers に `jp.signlink.Dorokei` を登録（App Store Connect の「+」→新規 App でも可）
-2. **App Store Connect**：マイApp →「+」→ 新規App
-   - プラットフォーム iOS／名前 `DOROKEI`／主要言語 日本語／Bundle ID `jp.signlink.Dorokei`／SKU は任意（例 `dorokei-ios-1`）
-   - カテゴリは「ゲーム > アクション」あたり、年齢 rating は 4+（暴力表現はブロック調の鬼ごっこ程度）
-3. **GitHub Secrets**（`signlinkjp/dorokei-game` → Settings → Secrets and variables → Actions）
-   - `APPLE_TEAM_ID` … 既存と同じ `TGBNH8WJV6`
-   - `APPSTORE_CONNECT_KEY_ID` / `APPSTORE_CONNECT_ISSUER_ID` / `APPSTORE_CONNECT_PRIVATE_KEY`
-     （既存の `ASC_API_KEY_ID` / `ASC_API_ISSUER_ID` / `ASC_API_KEY_P8` と同じ値でOK。ワークフローは両方の名前を読みます）
-4. **ワークフローの有効化**：`docs/ios-testflight-build1.yml` の中身を Safari でコピーし、
-   `.github/workflows/ios-testflight-build1.yml` としてコミット（＝この時点でビルドのみ1回走ります）
-5. **Actions →「DOROKEI iOS TestFlight Build 1」→ Run workflow**
+1. Safari で `docs/ios-testflight-build2.yml` を開き、全文をコピー
+2. GitHub の `signlinkjp/dorokei-game` → `.github/workflows/ios-testflight-build1.yml` → 鉛筆（Edit）
+   → 全文を置き換えて Commit
+3. Actions →「**DOROKEI iOS TestFlight**」→ Run workflow
    - `confirm_bundle_id` = `jp.signlink.Dorokei`
-   - まず `upload_to_testflight = false` で署名済み IPA と検証結果を確認
-   - 問題なければ `true` でもう一度実行 → TestFlight に Build 1 が届きます
+   - `upload_to_testflight` = **true**
+
+貼り付けるまでは、既存ワークフローの preflight が「`CURRENT_PROJECT_VERSION = 2`」と「= 1」の
+不一致で止まるので、古いビルド番号が TestFlight に出ることはありません。
+Apple 側の準備（Bundle ID・App Store Connect のアプリ・GitHub Secrets）は Build 1 で完了済みです。
 
 ## 設計メモ / 次の一手
 
-- 広い街でAIが壁に引っかからないよう、2mグリッドのA*＋見通しによる経路の間引きを `core.js` に実装。
 - コアは描画非依存なので、そのまま通信対戦（状態同期）やバランス調整の自動検証に回せます。
-- 今後の候補：視界・足音などの情報戦、牢屋の格子越しの会話、スパイの告発（投票）、ステージのバリエーション。
+- ステージは `stages.js` の台帳＋`Game({stage})` で切り替える設計。次は美術館（展示室・監視カメラ）や
+  廃校（5秒で閉まる密室）、地下鉄（ワープ）など、ICE WOLF の展開に合わせたギミックを足していきます。
+- アイコンは3案から選んでもらい、選ばれたものを Build 3 で差し替える予定です。
+- 今後の候補：足音・視界などの情報戦、牢屋の格子越しの会話、スパイの告発（投票）、観戦カメラ。

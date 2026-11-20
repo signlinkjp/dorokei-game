@@ -17,15 +17,16 @@
     <div class="hud-top">
       <div class="hud-row">
         <div class="hud-card timer">
-          <b id="timerValue">5:00</b><small>のこり</small>
+          <b id="timerValue">5:00</b><small data-i18n="hud.time">のこり</small>
         </div>
-        <button id="viewBtn" class="hud-btn" type="button">俯瞰</button>
+        <button id="viewBtn" class="hud-btn" type="button" data-i18n="hud.map">俯瞰</button>
+        <button id="soundBtn" class="hud-btn sound" type="button" aria-label="sound">🔊</button>
       </div>
       <div class="hud-row counts">
-        <div class="hud-card cop"><b id="copCount">3</b><small>警察</small></div>
-        <div class="hud-card thief"><b id="thiefCount">5</b><small>泥棒</small></div>
-        <div class="hud-card jail"><b id="jailCount">0</b><small>牢屋</small></div>
-        <div class="hud-card loot"><b id="lootCount">0/5</b><small>お宝</small></div>
+        <div class="hud-card cop"><b id="copCount">3</b><small data-i18n="hud.cop">警察</small></div>
+        <div class="hud-card thief"><b id="thiefCount">5</b><small data-i18n="hud.thief">泥棒</small></div>
+        <div class="hud-card jail"><b id="jailCount">0</b><small data-i18n="hud.jail">牢屋</small></div>
+        <div class="hud-card loot"><b id="lootCount">0/5</b><small data-i18n="hud.loot">お宝</small></div>
       </div>
     </div>
 
@@ -46,9 +47,14 @@
       <div class="gauge-bar"><i id="gaugeFill"></i></div>
     </div>
 
+    <div id="hideGauge" class="hide-gauge hidden">
+      <span id="hideLabel">隠れ</span>
+      <div class="gauge-bar"><i id="hideFill"></i></div>
+    </div>
+
     <div id="noteStack" class="note-stack">
       <div id="spyNote" class="note spy hidden"></div>
-      <div id="hiddenNote" class="note hidden-note hidden">物陰に隠れている（動くと出る）</div>
+      <div id="hiddenNote" class="note hidden-note hidden">物陰に隠れている（動くと出る・最大5秒）</div>
     </div>
 
     <div class="controls">
@@ -58,7 +64,7 @@
       <button id="actionBtn" class="action-btn" type="button">つかまえる</button>
     </div>
 
-    <div class="hint">ドラッグで移動 ／ 右下ボタンでアクション ／ 長押しで解錠・救出・もどす</div>
+    <div class="hint" data-i18n="hint.controls">ドラッグで移動 ／ 右下ボタンでアクション ／ 長押しで解錠・救出・もどす</div>
   </div>
 
   <!-- ===== タイトル ===== -->
@@ -66,48 +72,136 @@
     <div class="title-inner">
       <div class="siren" aria-hidden="true"><i class="r"></i><i class="b"></i></div>
       <h1 class="logo"><span class="logo-out">DOROKEI</span><span class="logo-in">DOROKEI</span></h1>
-      <div class="logo-sub">ドロケー × 人狼</div>
-      <p class="catch">
+      <div class="logo-sub" data-i18n="title.sub">ドロケー × 人狼</div>
+      <p class="catch" data-i18n-html="title.catch">
         警官から逃げて、お宝を5つ盗み出せ。<br />
         でも ── 仲間の中に、スパイがいる。
       </p>
 
       <div class="setup">
+        <div class="setup-row stage-row">
+          <span class="setup-label" data-i18n="stage.label">ステージ</span>
+          <div id="stageGrid" class="stage-grid"></div>
+        </div>
+        <div id="stageNote" class="stage-note hidden"></div>
         <div class="setup-row">
-          <span class="setup-label">あなたの役</span>
+          <span class="setup-label" data-i18n="role.label">あなたの役</span>
           <div class="seg" id="rolePick">
-            <button class="seg-btn active" data-role="auto" type="button">おまかせ</button>
-            <button class="seg-btn" data-role="cop" type="button">警察</button>
-            <button class="seg-btn" data-role="thief" type="button">泥棒</button>
+            <button class="seg-btn active" data-role="auto" type="button" data-i18n="role.auto">おまかせ</button>
+            <button class="seg-btn" data-role="cop" type="button" data-i18n="role.cop">警察</button>
+            <button class="seg-btn" data-role="thief" type="button" data-i18n="role.thief">泥棒</button>
           </div>
         </div>
         <div class="setup-row">
-          <span class="setup-label">スパイ設定</span>
+          <span class="setup-label" data-i18n="spy.label">スパイ設定</span>
           <div class="seg small" id="spyPick">
-            <button class="seg-btn active" data-spy="both" type="button">両方</button>
-            <button class="seg-btn" data-spy="cops" type="button">警察のみ</button>
-            <button class="seg-btn" data-spy="thieves" type="button">泥棒のみ</button>
-            <button class="seg-btn" data-spy="none" type="button">なし</button>
+            <button class="seg-btn active" data-spy="both" type="button" data-i18n="spy.both">両方</button>
+            <button class="seg-btn" data-spy="cops" type="button" data-i18n="spy.cops">警察のみ</button>
+            <button class="seg-btn" data-spy="thieves" type="button" data-i18n="spy.thieves">泥棒のみ</button>
+            <button class="seg-btn" data-spy="none" type="button" data-i18n="spy.none">なし</button>
           </div>
         </div>
         <div class="setup-row">
-          <span class="setup-label">自分がスパイ</span>
+          <span class="setup-label" data-i18n="selfspy.label">自分がスパイ</span>
           <div class="seg small" id="selfSpyPick">
-            <button class="seg-btn active" data-self="random" type="button">ランダム</button>
-            <button class="seg-btn" data-self="always" type="button">必ず</button>
-            <button class="seg-btn" data-self="never" type="button">なし</button>
+            <button class="seg-btn active" data-self="random" type="button" data-i18n="selfspy.random">ランダム</button>
+            <button class="seg-btn" data-self="always" type="button" data-i18n="selfspy.always">必ず</button>
+            <button class="seg-btn" data-self="never" type="button" data-i18n="selfspy.never">なし</button>
           </div>
         </div>
       </div>
 
-      <button id="startBtn" class="start-btn" type="button">ゲームスタート</button>
+      <button id="startBtn" class="start-btn" type="button" data-i18n="btn.start">ゲームスタート</button>
+
+      <div class="title-tools">
+        <button id="howtoBtn" class="tool-btn" type="button">❓ <span data-i18n="btn.howto">あそびかた</span></button>
+        <button id="settingsBtn" class="tool-btn" type="button">⚙️ <span data-i18n="btn.settings">設定</span></button>
+      </div>
 
       <div class="rules">
-        <div class="rule"><b class="c-cop">警察</b>泥棒を全員確保、または時間切れでお宝を1つでも守れば勝ち。</div>
-        <div class="rule"><b class="c-thief">泥棒</b>お宝5つを全部ゲートへ運べば勝ち。運搬中は足が遅くなる。</div>
-        <div class="rule"><b class="c-hide">隠れる</b>茂みの中でアクション → 半透明になって見つかりにくい（お宝持ちは不可）。</div>
-        <div class="rule"><b class="c-spy">スパイ</b>内通者は牢屋を解錠、密告者は運ばれたお宝を奪い返す。見られると正体発覚。</div>
-        <div class="rule muted">150m×150mの広い街（銀行・宝石店・美術館・公園・駅・商店街）。右上のレーダーで迷いません。CPU 8人＋あなた。</div>
+        <div class="rule"><b class="c-cop">警察</b><span data-i18n="rule.cop">泥棒を全員確保、または時間切れでお宝を1つでも守れば勝ち。</span></div>
+        <div class="rule"><b class="c-thief">泥棒</b><span data-i18n="rule.thief">お宝5つを全部ゲートへ運べば勝ち。運搬中は足が遅くなる。</span></div>
+        <div class="rule"><b class="c-hide">隠れる</b><span data-i18n="rule.hide">茂みで最大5秒隠れられる（出たあと3秒は隠れ直せない）。</span></div>
+        <div class="rule"><b class="c-search">捜索</b><span data-i18n="rule.search">警察は茂みの近くで「🔍 捜索」、隠れている泥棒を炙り出す。</span></div>
+        <div class="rule"><b class="c-spy">スパイ</b><span data-i18n="rule.spy">内通者は解錠、密告者はお宝を奪い返す。見られると正体発覚。</span></div>
+      </div>
+
+      <div class="title-links">
+        <button id="privacyBtn" class="link-btn" type="button" data-i18n="btn.privacy">プライバシーポリシー</button>
+        <span class="version">1.0.0 · Build 2</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== モーダル（あそびかた／設定／プライバシー） ===== -->
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <button id="modalClose" class="modal-close" type="button" aria-label="close">×</button>
+
+      <section class="panel" data-panel="howto">
+        <h2 data-i18n="howto.title">あそびかた</h2>
+        <div class="howto-flow" aria-hidden="true">
+          <div class="flow-step"><span>🕹️</span><b data-i18n="howto.move">移動</b></div>
+          <i>›</i>
+          <div class="flow-step"><span>🌳</span><b data-i18n="hide.label">隠れ</b><small>5s</small></div>
+          <i>›</i>
+          <div class="flow-step"><span>🔍</span><b data-i18n="search.name">捜索</b><small>4.5m</small></div>
+          <i>›</i>
+          <div class="flow-step"><span>💎</span><b data-i18n="hud.loot">お宝</b><small>×5</small></div>
+          <i>›</i>
+          <div class="flow-step"><span>🏁</span><b>EXIT</b></div>
+        </div>
+        <ul class="howto-list">
+          <li><b data-i18n="howto.move">移動</b><span data-i18n="howto.moveDesc"></span></li>
+          <li><b data-i18n="howto.action">アクション</b><span data-i18n="howto.actionDesc"></span></li>
+          <li><b data-i18n="howto.hide">隠れる</b><span data-i18n="howto.hideDesc"></span></li>
+          <li><b data-i18n="howto.search">捜索</b><span data-i18n="howto.searchDesc"></span></li>
+          <li><b data-i18n="howto.goalCop">警察の勝ち</b><span data-i18n="howto.goalCopDesc"></span></li>
+          <li><b data-i18n="howto.goalThief">泥棒の勝ち</b><span data-i18n="howto.goalThiefDesc"></span></li>
+          <li><b data-i18n="howto.spy">スパイ</b><span data-i18n="howto.spyDesc"></span></li>
+          <li><b data-i18n="howto.time">制限時間</b><span data-i18n="howto.timeDesc"></span></li>
+        </ul>
+      </section>
+
+      <section class="panel" data-panel="settings">
+        <h2 data-i18n="settings.title">設定</h2>
+        <div class="set-row">
+          <span class="set-label" data-i18n="settings.time">制限時間</span>
+          <div class="seg" id="timePick">
+            <button class="seg-btn" data-duration="180" type="button" data-i18n="time.3">3分</button>
+            <button class="seg-btn" data-duration="300" type="button" data-i18n="time.5">5分</button>
+            <button class="seg-btn" data-duration="420" type="button" data-i18n="time.7">7分</button>
+          </div>
+        </div>
+        <div class="set-row">
+          <span class="set-label" data-i18n="settings.sound">サウンド</span>
+          <div class="seg" id="soundPick">
+            <button class="seg-btn" data-sound="on" type="button" data-i18n="settings.soundOn">ON</button>
+            <button class="seg-btn" data-sound="off" type="button" data-i18n="settings.soundOff">OFF</button>
+          </div>
+        </div>
+        <div class="set-row">
+          <span class="set-label" data-i18n="settings.lang">言語</span>
+          <select id="langSelect" class="lang-select" aria-label="Language"></select>
+        </div>
+        <p class="set-note" data-i18n="settings.preview">設定はこの端末に保存されます。</p>
+        <button id="privacyBtn2" class="tool-btn wide" type="button">🛡️ <span data-i18n="btn.privacy">プライバシーポリシー</span></button>
+      </section>
+
+      <section class="panel" data-panel="privacy">
+        <h2 data-i18n="privacy.title">プライバシーポリシー</h2>
+        <p class="privacy-updated" data-i18n="privacy.updated"></p>
+        <p data-i18n="privacy.p1"></p>
+        <p data-i18n="privacy.p2"></p>
+        <p data-i18n="privacy.p3"></p>
+        <p data-i18n="privacy.p4"></p>
+        <p data-i18n="privacy.p5"></p>
+        <p data-i18n="privacy.p6"></p>
+        <a class="mail" href="mailto:t.maks.ts@gmail.com">t.maks.ts@gmail.com</a>
+      </section>
+
+      <div class="modal-foot">
+        <button class="modal-cta" type="button" data-close data-i18n="btn.close">とじる</button>
       </div>
     </div>
   </div>
@@ -120,8 +214,8 @@
       <p id="resultReason" class="result-reason">お宝を守りきった</p>
       <div id="resultStats" class="result-stats"></div>
       <div class="result-actions">
-        <button id="againBtn" class="start-btn" type="button">もう一回</button>
-        <button id="homeBtn" class="ghost-btn" type="button">タイトルへ</button>
+        <button id="againBtn" class="start-btn" type="button" data-i18n="result.again">もう一回</button>
+        <button id="homeBtn" class="ghost-btn" type="button" data-i18n="result.home">タイトルへ</button>
       </div>
     </div>
   </div>
