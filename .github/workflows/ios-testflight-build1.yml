@@ -1,22 +1,24 @@
 # ============================================================
-# Build 2 用ワークフロー（トモアキさんが Safari で貼り付ける用）
+# Build 3 用ワークフロー（トモアキさんが Safari で貼り付ける用）
 #
 # GitHub連携の権限ではワークフローファイルを直接更新できないため、
 # このファイルの中身をそのままコピーして
 #   .github/workflows/ios-testflight-build1.yml
-# を上書きしてください（Build 1 と同じ手順）。
+# を上書きしてください（Build 1・2 と同じ手順）。
 # 貼り付けるまで、既存ワークフローの preflight は
-# 「CURRENT_PROJECT_VERSION = 2」と Build 1 の「= 1」の不一致で止まるので、
+# 「CURRENT_PROJECT_VERSION = 3」と Build 2 の「= 2」の不一致で止まるので、
 # 古いビルド番号が TestFlight に出ることはありません。
+#
+# ※ 1行目は必ず「# 」で始まる YAML コメントのままにしてください。
 # ============================================================
-# DOROKEI — iOS TestFlight ビルド＆配信
+# DOROKEI — iOS TestFlight ビルド＆配信（Build 3）
 #
 # 使い方（トモアキさん向け）:
 #   Actions →「DOROKEI iOS TestFlight」→ Run workflow
 #     - confirm_bundle_id に `jp.signlink.Dorokei`
 #     - upload_to_testflight は true（TestFlight へ配信）
-#   ※ Build 1 で署名・配信は確認済みなので、ワークフローファイルを貼り直す作業は不要です。
-#   ※ ビルド番号は下の BUILD_NUMBER で管理します（Build 2 = 2）。
+#   ※ ビルド番号は下の BUILD_NUMBER で管理します（Build 3 = 3）。
+#   ※ Build 3 は決定版アイコン・警察署の中の牢屋・15秒拘束→寝返り・HUD整理を含みます。
 #
 # 必要な Secrets（Repository secrets / 既存リポジトリと同じ値）:
 #   APPLE_TEAM_ID                   … 例 TGBNH8WJV6
@@ -50,7 +52,7 @@ concurrency:
 env:
   BUNDLE_ID: jp.signlink.Dorokei
   MARKETING_VERSION: "1.0.0"
-  BUILD_NUMBER: "2"
+  BUILD_NUMBER: "3"
 
 jobs:
   preflight:
@@ -99,6 +101,15 @@ jobs:
           grep -q 'id="hideGauge"' www/index.html
           grep -q 'id="stageGrid"' www/index.html
           grep -q 'data-panel="privacy"' www/index.html
+          # Build 3: 15秒拘束→寝返り／役とミッションの常時表示／MENU／警察署の中の牢屋
+          grep -q 'detainTime: 15' www/src/core.js
+          grep -q 'spyNameKey' www/src/core.js
+          grep -q 'role.spyUnified' www/src/i18n.js
+          grep -q 'id="roleCard"' www/index.html
+          grep -q 'id="menuBtn"' www/index.html
+          grep -q 'id="noteRail"' www/index.html
+          grep -q "kind: 'police'" www/src/core.js
+          test -f test/build3.test.js
           grep -q 'WebAudio\|AudioContext' www/src/audio.js
           test -f www/src/audio.js
           test -f www/src/i18n.js
@@ -119,7 +130,7 @@ jobs:
           pbx = pathlib.Path('ios/App/App.xcodeproj/project.pbxproj').read_text()
           assert 'PRODUCT_BUNDLE_IDENTIFIER = jp.signlink.Dorokei;' in pbx
           assert 'MARKETING_VERSION = 1.0.0;' in pbx
-          assert 'CURRENT_PROJECT_VERSION = 2;' in pbx
+          assert 'CURRENT_PROJECT_VERSION = 3;' in pbx
           print('iOS project contract OK')
           PY
 
@@ -285,7 +296,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dorokei-testflight-build2-evidence
+          name: dorokei-testflight-build3-evidence
           path: |
             build/release/*.log
             build/release/*.json
