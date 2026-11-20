@@ -1,25 +1,30 @@
-# DOROKEI — TestFlight Build 1（下書き）
+============================================================
+# Build 2 用ワークフロー（トモアキさんが Safari で貼り付ける用）
+#
+# GitHub連携の権限ではワークフローファイルを直接更新できないため、
+# このファイルの中身をそのままコピーして
+#   .github/workflows/ios-testflight-build1.yml
+# を上書きしてください（Build 1 と同じ手順）。
+# 貼り付けるまで、既存ワークフローの preflight は
+# 「CURRENT_PROJECT_VERSION = 2」と Build 1 の「= 1」の不一致で止まるので、
+# 古いビルド番号が TestFlight に出ることはありません。
+# ============================================================
+# DOROKEI — iOS TestFlight ビルド＆配信
 #
 # 使い方（トモアキさん向け）:
-#   1. iPhone の Safari でこのファイルを開き、全文をコピー
-#   2. GitHub の signlinkjp/dorokei-game → Add file → Create new file
-#      → ファイル名に `.github/workflows/ios-testflight-build1.yml` を貼り付け
-#      → 本文に貼り付けて Commit（この時点で「ビルドのみ」が1回走ります。アップロードはしません）
-#   3. Actions →「DOROKEI iOS TestFlight Build 1」→ Run workflow
-#      - confirm_bundle_id に `jp.signlink.Dorokei`
-#      - upload_to_testflight は最初 false（署名済みIPAの確認まで）
-#      - 問題なければ true でもう一度実行して TestFlight へ
+#   Actions →「DOROKEI iOS TestFlight」→ Run workflow
+#     - confirm_bundle_id に `jp.signlink.Dorokei`
+#     - upload_to_testflight は true（TestFlight へ配信）
+#   ※ Build 1 で署名・配信は確認済みなので、ワークフローファイルを貼り直す作業は不要です。
+#   ※ ビルド番号は下の BUILD_NUMBER で管理します（Build 2 = 2）。
 #
-# 必要な Secrets（Repository secrets / 既存リポジトリと同じ値を使えます）:
+# 必要な Secrets（Repository secrets / 既存リポジトリと同じ値）:
 #   APPLE_TEAM_ID                   … 例 TGBNH8WJV6
 #   APPSTORE_CONNECT_KEY_ID         … App Store Connect API キーの Key ID（ASC_API_KEY_ID でも可）
 #   APPSTORE_CONNECT_ISSUER_ID      … Issuer ID（ASC_API_ISSUER_ID でも可）
 #   APPSTORE_CONNECT_PRIVATE_KEY    … AuthKey_*.p8 の中身（ASC_API_KEY_P8 でも可）
-#
-# ※ このファイルは docs/ に置いてあります。Safari から .github/workflows/ へ貼るのは
-#    ワークフローを有効にする操作なので、トモアキさんの手元で行います。
 
-name: DOROKEI iOS TestFlight Build 1
+name: DOROKEI iOS TestFlight
 
 on:
   workflow_dispatch:
@@ -33,25 +38,19 @@ on:
         description: "TestFlight へアップロードする（false = 署名済みIPAの作成まで）"
         required: true
         type: boolean
-        default: false
-  push:
-    # このワークフローファイル自身が push された時だけ「ビルドのみ」を走らせる
-    paths:
-      - ".github/workflows/ios-testflight-build1.yml"
-    branches:
-      - main
+        default: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: dorokei-ios-testflight-build1
+  group: dorokei-ios-testflight
   cancel-in-progress: false
 
 env:
   BUNDLE_ID: jp.signlink.Dorokei
   MARKETING_VERSION: "1.0.0"
-  BUILD_NUMBER: "1"
+  BUILD_NUMBER: "2"
 
 jobs:
   preflight:
@@ -86,10 +85,24 @@ jobs:
           node --check www/src/render.js
           node --check www/src/main.js
           node --check www/src/minimap.js
+          node --check www/src/audio.js
+          node --check www/src/i18n.js
+          node --check www/src/stages.js
           test -f www/vendor/three.module.js
           grep -q 'id="minimap"' www/index.html
           grep -q 'DOROKEI' www/index.html
           grep -q '150' www/src/core.js
+          # Build 2: 茂みは5秒・クールタイム3秒／警察の捜索／音・言語・ステージ
+          grep -q 'hideMax: 5' www/src/core.js
+          grep -q 'hideCooldown: 3' www/src/core.js
+          grep -q 'searchRadius: 4.5' www/src/core.js
+          grep -q 'id="hideGauge"' www/index.html
+          grep -q 'id="stageGrid"' www/index.html
+          grep -q 'data-panel="privacy"' www/index.html
+          grep -q 'WebAudio\|AudioContext' www/src/audio.js
+          test -f www/src/audio.js
+          test -f www/src/i18n.js
+          test -f www/src/stages.js
           echo "DOROKEI web assets OK"
 
       - name: Guard the iOS project contract
@@ -106,7 +119,7 @@ jobs:
           pbx = pathlib.Path('ios/App/App.xcodeproj/project.pbxproj').read_text()
           assert 'PRODUCT_BUNDLE_IDENTIFIER = jp.signlink.Dorokei;' in pbx
           assert 'MARKETING_VERSION = 1.0.0;' in pbx
-          assert 'CURRENT_PROJECT_VERSION = 1;' in pbx
+          assert 'CURRENT_PROJECT_VERSION = 2;' in pbx
           print('iOS project contract OK')
           PY
 
@@ -272,7 +285,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dorokei-testflight-build1-evidence
+          name: dorokei-testflight-build2-evidence
           path: |
             build/release/*.log
             build/release/*.json
