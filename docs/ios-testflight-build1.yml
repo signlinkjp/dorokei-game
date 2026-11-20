@@ -64,7 +64,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: false
 
       - name: Confirm run intent
         if: github.event_name == 'workflow_dispatch'
@@ -145,7 +144,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: false
 
       - name: Write the App Store Connect key
         shell: bash
