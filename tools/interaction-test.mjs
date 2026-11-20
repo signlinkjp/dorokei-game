@@ -281,6 +281,259 @@ out.sound = await page.evaluate(() => ({
 }));
 check(out.sound.enabled === true && out.sound.saved === true, 'HUDのサウンドONが効かない');
 
+// ---- Build 3: 自分の役とミッションの常時表示 -----------------------------
+const roleOf = () =>
+  page.evaluate(() => ({
+    tag: document.getElementById('roleTag').textContent,
+    mission: document.getElementById('roleText').textContent,
+    chip: document.getElementById('roleChip').textContent,
+    chipShown: !document.getElementById('roleChip').classList.contains('hidden'),
+    cls: document.getElementById('roleCard').className,
+    role: window.__dorokei.game?.player?.role,
+    state: window.__dorokei.game?.player?.state,
+  }));
+
+await page.evaluate(() => {
+  window.__dorokei.freeze(false);
+  window.__dorokei.startGame({
+    playerRole: 'cop',
+    playerSpy: 'always',
+    spyMode: 'both',
+    autoplay: true,
+    seed: 21,
+    duration: 300,
+  });
+});
+await page.waitForTimeout(400);
+out.roleBothCopSpy = await roleOf();
+check(out.roleBothCopSpy.tag === '🐺 人狼警察', `双方設定の警察側スパイが「人狼警察」でない (${out.roleBothCopSpy.tag})`);
+check(/牢屋を解錠/.test(out.roleBothCopSpy.mission), `警察側スパイのミッションが違う (${out.roleBothCopSpy.mission})`);
+
+await page.evaluate(() => {
+  window.__dorokei.startGame({
+    playerRole: 'thief',
+    playerSpy: 'always',
+    spyMode: 'both',
+    autoplay: true,
+    seed: 22,
+  });
+});
+await page.waitForTimeout(350);
+out.roleBothThiefSpy = await roleOf();
+check(
+  /潜入捜査官/.test(out.roleBothThiefSpy.tag) && /FBI/.test(out.roleBothThiefSpy.tag),
+  `泥棒側スパイが「潜入捜査官（FBI）」でない (${out.roleBothThiefSpy.tag})`,
+);
+
+await page.evaluate(() => {
+  window.__dorokei.startGame({
+    playerRole: 'thief',
+    playerSpy: 'always',
+    spyMode: 'thieves',
+    autoplay: true,
+    seed: 23,
+  });
+});
+await page.waitForTimeout(350);
+out.roleSingleSpy = await roleOf();
+check(
+  out.roleSingleSpy.tag === '🐺 人狼（スパイ）',
+  `片側スパイは「人狼（スパイ）」に統一されていない (${out.roleSingleSpy.tag})`,
+);
+
+// ---- Build 3: 発覚→15秒拘束（スティックで俯瞰）→寝返りの即時切替 -------
+out.detainStart = await page.evaluate(() => {
+  const { game, world } = window.__dorokei;
+  const p = game.player;
+  const witness = game.agents.find((a) => a !== p && a.state === 'free' && a.team !== p.team);
+  game.expose(p, witness);
+  return {
+    state: p.state,
+    detainLeft: +p.detainLeft.toFixed(1),
+    jailedSlot: p.jailSlot,
+    jailPos: [p.x, p.z],
+    jail: world.cameraPose(p).jail === true,
+    spyNoteHidden: document.getElementById('spyNote').classList.contains('hidden'),
+  };
+});
+await page.waitForTimeout(250);
+out.detainCard = await roleOf();
+check(out.detainStart.state === 'detained', '発覚しても拘束状態にならない');
+check(out.detainStart.jail, '拘束中のカメラが俯瞰にならない');
+check(/15秒拘束中/.test(out.detainCard.tag), `拘束中バッジが出ない (${out.detainCard.tag})`);
+check(
+  /あと\d+秒後に泥棒へ転向/.test(out.detainCard.mission),
+  `転向カウントダウンが読めない (${out.detainCard.mission})`,
+);
+check(/スティックで周りを見渡せる/.test(out.detainCard.chip), '拘束中のカメラ操作の案内がない');
+
+// スティックでカメラがパンし、キャラは動かない
+out.jailPanBefore = await page.evaluate(() => {
+  const { game, world } = window.__dorokei;
+  const p = game.player;
+  return { x: p.x, z: p.z, pan: { ...world.lookPan } };
+});
+const stickBox = await page.locator('#stick').boundingBox();
+await page.mouse.move(stickBox.x + stickBox.width / 2, stickBox.y + stickBox.height / 2);
+await page.mouse.down();
+await page.mouse.move(
+  stickBox.x + stickBox.width / 2 + 42,
+  stickBox.y + stickBox.height / 2,
+  { steps: 4 },
+);
+await page.waitForTimeout(450);
+out.jailPanMid = await page.evaluate(() => {
+  const { game, world } = window.__dorokei;
+  const p = game.player;
+  return { x: p.x, z: p.z, pan: { ...world.lookPan } };
+});
+await page.mouse.up();
+check(
+  out.jailPanMid.pan.x > out.jailPanBefore.pan.x + 1,
+  `拘束中にスティックでカメラが動かない (${JSON.stringify({ a: out.jailPanBefore, b: out.jailPanMid })})`,
+);
+check(
+  Math.abs(out.jailPanMid.x - out.jailPanBefore.x) < 0.01 &&
+    Math.abs(out.jailPanMid.z - out.jailPanBefore.z) < 0.01,
+  '拘束中なのにキャラが動いてしまう',
+);
+
+// 15秒経過 → 見た目どおりの陣営へ寝返り、カードが即切り替わる
+await page.evaluate(() => window.__dorokei.game.stepSeconds(16));
+await page.waitForTimeout(300);
+out.defect = await roleOf();
+out.defectInfo = await page.evaluate(() => {
+  const { game, world } = window.__dorokei;
+  const p = game.player;
+  return {
+    team: p.team,
+    role: p.role,
+    isSpy: p.isSpy,
+    defections: game.stats.defections,
+    jailCam: world.cameraPose(p).jail === true,
+    events: game.events.map((e) => e.type),
+  };
+});
+check(out.defectInfo.role === 'thief' && out.defectInfo.team === 'thief', '15秒後に泥棒へ寝返らない');
+check(out.defectInfo.defections === 1, '寝返りの記録がない');
+check(!out.defectInfo.jailCam, '寝返り後もカメラが牢屋のまま');
+check(out.defect.tag === '🎭 泥棒', `寝返り後のバッジが切り替わらない (${out.defect.tag})`);
+check(/お宝をゲートへ運べ/.test(out.defect.mission), `寝返り後のミッションが違う (${out.defect.mission})`);
+
+// ---- Build 3: 画面中央に何も浮いていない ---------------------------------
+out.center = await page.evaluate(() => {
+  const el = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+  return { tag: el?.tagName, id: el?.id, cls: el?.className };
+});
+check(
+  out.center.id === 'scene' || /canvas/i.test(out.center.tag || ''),
+  `画面中央がふさがっている (${JSON.stringify(out.center)})`,
+);
+
+// ---- Build 3: MENU（つづける／ホームへ） ---------------------------------
+out.menu = await page.evaluate(async () => {
+  const { game } = window.__dorokei;
+  const t0 = game.time;
+  document.getElementById('menuBtn').click();
+  await new Promise((r) => setTimeout(r, 450));
+  const open = !document.getElementById('pause').classList.contains('hidden');
+  const t1 = game.time;
+  document.getElementById('pauseResume').click();
+  await new Promise((r) => setTimeout(r, 350));
+  const closed = document.getElementById('pause').classList.contains('hidden');
+  const t2 = game.time;
+  return { open, closed, pausedTime: +(t0 - t1).toFixed(2), resumedTime: +(t1 - t2).toFixed(2) };
+});
+check(out.menu.open, 'MENU ボタンでメニューが開かない');
+check(out.menu.closed, '「つづける」でメニューが閉じない');
+check(out.menu.pausedTime === 0, `メニュー中も試合が進んでしまう (${out.menu.pausedTime})`);
+check(out.menu.resumedTime > 0, '「つづける」で試合が再開しない');
+
+out.homeFlow = await page.evaluate(async () => {
+  document.getElementById('menuBtn').click();
+  await new Promise((r) => setTimeout(r, 200));
+  document.getElementById('pauseHome').click();
+  await new Promise((r) => setTimeout(r, 200));
+  const confirm = !document.getElementById('pauseConfirm').classList.contains('hidden');
+  document.getElementById('pauseHomeNo').click();
+  await new Promise((r) => setTimeout(r, 150));
+  const cancelled = document.getElementById('pauseConfirm').classList.contains('hidden');
+  document.getElementById('pauseHome').click();
+  await new Promise((r) => setTimeout(r, 150));
+  document.getElementById('pauseHomeYes').click();
+  await new Promise((r) => setTimeout(r, 350));
+  return {
+    confirm,
+    cancelled,
+    titleShown: !document.getElementById('title').classList.contains('hidden'),
+    hudHidden: document.getElementById('hud').classList.contains('hidden'),
+    pauseHidden: document.getElementById('pause').classList.contains('hidden'),
+  };
+});
+check(out.homeFlow.confirm, 'ホームへ の確認が出ない');
+check(out.homeFlow.cancelled, '確認をキャンセルできない');
+check(
+  out.homeFlow.titleShown && out.homeFlow.hudHidden && out.homeFlow.pauseHidden,
+  `ホームへ戻れない (${JSON.stringify(out.homeFlow)})`,
+);
+
+// ---- Build 3: iPhone 縦・横でHUDが重ならない ---------------------------
+out.layout = {};
+for (const [name, viewport] of [
+  ['portrait', { width: 430, height: 932 }],
+  ['landscape', { width: 932, height: 430 }],
+]) {
+  await page.setViewportSize(viewport);
+  await page.evaluate(() => {
+    window.__dorokei.startGame({
+      playerRole: 'thief',
+      playerSpy: 'never',
+      spyMode: 'none',
+      autoplay: true,
+      seed: 31,
+    });
+  });
+  await page.waitForTimeout(500);
+  out.layout[name] = await page.evaluate(() => {
+    const rect = (sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: r.left, y: r.top, w: r.width, h: r.height };
+    };
+    const overlap = (a, b) =>
+      !!a && !!b && a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    const stack = rect('.hud-stack');
+    const radar = rect('.radar');
+    const role = rect('#roleCard');
+    const stick = rect('#stick');
+    const action = rect('#actionBtn');
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    return {
+      vw,
+      vh,
+      stackRadar: overlap(stack, radar),
+      roleRadar: overlap(role, radar),
+      roleStick: overlap(role, stick),
+      roleAction: overlap(role, action),
+      roleRight: role ? +(role.x + role.w).toFixed(0) : null,
+      roleBottom: role ? +(role.y + role.h).toFixed(0) : null,
+      center: (() => {
+        const el = document.elementFromPoint(vw / 2, vh / 2);
+        return el?.id || el?.tagName;
+      })(),
+    };
+  });
+  const L = out.layout[name];
+  check(!L.stackRadar && !L.roleRadar, `${name}: HUDとミニマップが重なる`);
+  check(!L.roleStick && !L.roleAction, `${name}: 役カードが操作ボタンと重なる`);
+  check(L.roleRight < L.vw * 0.6, `${name}: 役カードが画面中央に食い込む (${L.roleRight}/${L.vw})`);
+  check(L.center === 'scene' || L.center === 'CANVAS', `${name}: 中央が ${L.center} でふさがれている`);
+}
+await page.setViewportSize({ width: 900, height: 600 });
+await page.waitForTimeout(200);
+
 // ---- リザルト -------------------------------------------------------------
 await page.evaluate(() => {
   window.__dorokei.freeze(false);

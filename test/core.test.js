@@ -288,7 +288,7 @@ test('お宝を持った泥棒を捕まえると、お宝は街のどこかへ�
   assert.ok(Math.hypot(tr.x - MAP.jail.x, tr.z - MAP.jail.z) > 20);
 });
 
-test('正体発覚していない内通者は警官に捕まえられず、発覚後は牢屋へ送られる', () => {
+test('正体発覚していない内通者は警官に捕まえられず、発覚すると牢屋で15秒拘束→警察へ寝返る（Build 3）', () => {
   const g = makeGame({ playerRole: 'cop', playerSpy: 'always' });
   const spy = g.player;
   assert.equal(spy.role, ROLE.COP_SPY);
@@ -297,12 +297,20 @@ test('正体発覚していない内通者は警官に捕まえられず、発�
   assert.equal(g.canArrest(cop, spy), false);
   assert.equal(g.arrest(cop, spy), false);
   g.expose(spy);
+  // 即逮捕ではなく牢屋へ移送して15秒の拘束
+  assert.equal(spy.state, 'detained');
+  assert.equal(spy.detainLeft, 15);
   cop.arrestCd = 0;
-  assert.equal(g.canArrest(cop, spy), true);
-  assert.equal(g.arrest(cop, spy), true);
-  assert.equal(spy.state, 'jailed');
-  // 牢屋に入ったら本当の味方（泥棒）が助けられる
-  assert.equal(spy.team, 'thief');
+  assert.equal(g.canArrest(cop, spy), false, '拘束中は確保できない');
+  // 15秒後は見た目どおりの警察へ強制転向
+  g.stepSeconds(14.5);
+  assert.equal(spy.state, 'detained');
+  g.stepSeconds(1.0);
+  assert.equal(spy.state, 'free');
+  assert.equal(spy.role, ROLE.COP);
+  assert.equal(spy.team, 'cop');
+  assert.equal(spy.isSpy, false);
+  assert.ok(g.events.some((e) => e.type === 'betray' && e.by === spy.id));
 });
 
 // ---- 隠れる ---------------------------------------------------------------
@@ -384,7 +392,7 @@ test('内通者は牢屋前で1.5秒長押しすると解錠でき、警官に�
   assert.ok(jailed.z < MAP.jailDoor.z);
 });
 
-test('解錠中を他の警官に近くで見られると正体発覚し、以降は捕まえられる', () => {
+test('解錠中を他の警官に近くで見られると正体発覚し、解錠は中断されて15秒後に警察へ寝返る（Build 3）', () => {
   const g = makeGame({ playerRole: 'cop', playerSpy: 'always' });
   const spy = g.player;
   const jailed = jailThief(g);
@@ -401,8 +409,12 @@ test('解錠中を他の警官に近くで見られると正体発覚し、以�
   g.stepSeconds(0.5);
   assert.equal(spy.exposed, true);
   assert.equal(g.stats.exposures, 1);
+  assert.equal(spy.state, 'detained', '発覚したら警察署の牢屋へ');
   g.stepSeconds(1.2);
-  assert.equal(jailed.state, 'free');
+  assert.equal(jailed.state, 'jailed', '発覚したら解錠は中断される');
+  g.stepSeconds(14);
+  assert.equal(spy.state, 'free');
+  assert.equal(spy.role, ROLE.COP, '15秒後に警察へ寝返る');
 });
 
 // ---- 泥棒側スパイ（密告者）のお宝奪い返し ---------------------------------
@@ -431,7 +443,7 @@ test('密告者は脱出ゲート前の長押しで、運ばれたお宝を街�
   assert.ok(Math.hypot(swiped.x - MAP.gate.x, swiped.z - MAP.gate.z) > 20);
 });
 
-test('お宝の隠し戻し中を他の泥棒に見られると正体発覚し、泥棒に捕まえられる', () => {
+test('お宝の隠し戻し中を他の泥棒に見られると正体発覚し、15秒後に泥棒になる（Build 3）', () => {
   const g = makeGame({ playerRole: 'thief', playerSpy: 'always' });
   const spy = g.player;
   g.treasures[0].state = 'secured';
@@ -450,10 +462,13 @@ test('お宝の隠し戻し中を他の泥棒に見られると正体発覚し�
   g.stepSeconds(0.5);
   assert.equal(spy.exposed, true);
   assert.equal(g.stats.exposures, 1);
-  witness.arrestCd = 0;
-  assert.equal(g.canArrest(witness, spy), true, '発覚後は泥棒が牢屋へ送れる');
-  assert.equal(g.arrest(witness, spy), true);
-  assert.equal(spy.state, 'jailed');
+  assert.equal(spy.state, 'detained', '発覚したら牢屋で拘束');
+  assert.equal(spy.team, 'cop', '拘束中は元の陣営のまま');
+  g.stepSeconds(15);
+  assert.equal(spy.state, 'free');
+  assert.equal(spy.role, ROLE.THIEF, '15秒後に泥棒へ寝返る');
+  assert.equal(spy.team, 'thief');
+  assert.equal(g.stats.defections, 1);
 });
 
 test('密告者はお宝を運べない（盗むのは本物の泥棒の役目）', () => {

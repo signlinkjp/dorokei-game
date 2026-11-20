@@ -11,6 +11,9 @@
 //    発覚後は元の陣営からも捕まえて牢屋へ送れる。
 //  - Build 2: 茂みに隠れられるのは1回 最大5秒（解除後3秒のクールタイム）とし、
 //    警察は茂みの近くで「捜索」して波紋で炙り出せるようにした。
+//  - Build 3: スパイは現場を相手陣営に見られると即逮捕ではなく警察署の牢屋へ移送され、
+//    15秒間その場で停止（俯瞰カメラで周りを見られる）。15秒後に見た目どおりの陣営へ
+//    強制転向（寝返り）する。強制転向は発覚した時だけ・1試合1回限り。
 
 import { DEFAULT_STAGE, isStagePlayable } from './stages.js';
 
@@ -42,6 +45,32 @@ export function isSpyRole(role) {
   return role === ROLE.COP_SPY || role === ROLE.THIEF_SPY;
 }
 
+/**
+ * スパイの呼び名（Build 3）。
+ *  - 片側だけスパイ（cops / thieves）… どちらも「人狼（スパイ）」に統一
+ *  - 双方スパイ（both）… 警察側の敵＝「人狼警察」／泥棒側の警察スパイ＝「潜入捜査官（FBI）」
+ * 戻り値は i18n のキー（表示は main.js が t() で引く）。
+ */
+export function spyNameKey(role, spyMode = 'both') {
+  if (role === ROLE.COP_SPY) return spyMode === 'both' ? 'role.copSpy' : 'role.spyUnified';
+  if (role === ROLE.THIEF_SPY) return spyMode === 'both' ? 'role.thiefSpy' : 'role.spyUnified';
+  return null;
+}
+
+/** スパイの説明文の i18n キー（呼び名と同じ振り分け） */
+export function spyDescKey(role, spyMode = 'both') {
+  if (role === ROLE.COP_SPY) return spyMode === 'both' ? 'role.copSpy.desc' : 'role.spyUnified.desc';
+  if (role === ROLE.THIEF_SPY) return spyMode === 'both' ? 'role.thiefSpy.desc' : 'role.spyUnified.desc';
+  return null;
+}
+
+/** 発覚後に寝返る先の役職（見た目どおりの陣営の通常メンバー） */
+export function betrayRoleOf(role) {
+  if (role === ROLE.COP_SPY) return ROLE.COP;
+  if (role === ROLE.THIEF_SPY) return ROLE.THIEF;
+  return role;
+}
+
 export const CFG = Object.freeze({
   duration: 300, // 広い街に合わせた制限時間（秒）
   treasureCount: 5, // 配置するお宝の数
@@ -61,6 +90,7 @@ export const CFG = Object.freeze({
   freeImmunity: 2.0,
   exposeRange: 7.5,
   exposeAfter: 0.15,
+  detainTime: 15, // スパイ発覚後の拘束秒数（Build 3・トモアキさん指定）
   copVision: 17,
   thiefDodge: 7.0,
   unlockCooldown: 5.0,
@@ -121,7 +151,8 @@ const OBSTACLES = [
   { x: 62, z: 62, w: 16, d: 12, h: 7, color: 0xcfc3ea, kind: 'shop', sign: 'ARCADE' },
   { x: 36, z: 62, w: 14, d: 10, h: 6.5, color: 0xf2cf8e, kind: 'shop', sign: 'DINER' },
   { x: -30, z: 62, w: 12, d: 10, h: 6, color: 0xbfe0c8, kind: 'shop', sign: 'CAFE' },
-  // 警察署＋牢屋の建物（南西）
+  // 警察署＋牢屋の建物（南西）。牢屋は警察署の中庭（Build 3）
+  { x: -62, z: 72.8, w: 22, d: 4.0, h: 7.6, color: 0xeef3fb, kind: 'police', sign: 'POLICE' },
   // 駐車場の車（隠れられる物陰）
   { x: -30, z: -58, w: 3.4, d: 1.8, h: 1.5, color: 0xe0574f, kind: 'car' },
   { x: -30, z: -62, w: 3.4, d: 1.8, h: 1.5, color: 0x4f8ee0, kind: 'car' },
@@ -134,8 +165,7 @@ const OBSTACLES = [
 ];
 
 // 牢屋（警察署の中庭）
-const JAIL = { x: -62, z: 62, w: 20, d: 16 };
-const JAIL_DOOR = { x: -62, z: 53.6 };
+const JAIL = { x: -62, z: 62, w: 20, d: 16 };const JAIL_DOOR = { x: -62, z: 53.6 };
 
 const JAIL_WALLS = [
   { x: -72.4, z: 62, w: 0.8, d: 16.8, h: 2.2 },
@@ -539,6 +569,7 @@ export class Game {
       throw new Error(`DOROKEI: 遊べないステージです (${this.stage})`);
     }
     this.seed = opts.seed ?? 20261121;
+    this.spyMode = opts.spyMode ?? 'both';
     this.rng = mulberry32(this.seed);
     this.autoplay = !!opts.autoplay;
     this.phase = 'playing';
@@ -559,6 +590,7 @@ export class Game {
       returns: 0,
       hides: 0,
       searches: 0,
+      defections: 0,
     };
     this.input = { x: 0, z: 0, action: false };
 
@@ -606,6 +638,9 @@ export class Game {
         unlockCd: 0,
         whistleCd: 0,
         exposed: false,
+        betrayUsed: false, // 強制転向は1試合1回まで
+        detainLeft: 0, // 「拘束」残り秒数
+        detainedFrom: null, // 発覚前の陣営
         moving: false,
         jailSlot: -1,
         path: null,
@@ -736,6 +771,21 @@ export class Game {
     return true;
   }
 
+  /** スパイの現場を目撃した相手陣営（見つかると発覚する） */
+  witnessOf(agent) {
+    const found = this.nearest(
+      agent,
+      (o) =>
+        o !== agent &&
+        o.state === 'free' &&
+        o.team !== agent.team &&
+        !o.hidden &&
+        dist(agent, o) <= this.cfg.exposeRange,
+      this.cfg.exposeRange,
+    );
+    return found.agent || null;
+  }
+
   /**
    * 捕まえられるか。
    *  - 警官の見た目 → 泥棒の見た目を確保できる。正体発覚した内通者（警官の見た目）も確保できる。
@@ -760,7 +810,11 @@ export class Game {
   }
 
   freeJailSlot() {
-    const used = new Set(this.agents.filter((a) => a.state === 'jailed').map((a) => a.jailSlot));
+    const used = new Set(
+      this.agents
+        .filter((a) => a.state === 'jailed' || a.state === 'detained')
+        .map((a) => a.jailSlot),
+    );
     for (let i = 0; i < JAIL_SLOTS.length; i++) if (!used.has(i)) return i;
     return 0;
   }
@@ -824,15 +878,77 @@ export class Game {
     return target;
   }
 
+  /**
+   * スパイの正体発覚（Build 3）。
+   * 即逮捕ではなく警察署の牢屋へ移送し、cfg.detainTime 秒の拘束（俯瞰カメラ）に入る。
+   * 拘束が終わると見た目どおりの陣営へ強制転向する（1試合1回のみ）。
+   */
   expose(agent, witness) {
-    if (agent.exposed || !agent.isSpy) return false;
+    if (!agent || agent.exposed || !agent.isSpy) return false;
+    if (agent.betrayUsed) return false;
     agent.exposed = true;
     this.stats.exposures++;
+    this.detain(agent, witness);
     this.pushEvent({
       type: 'expose',
       by: agent.id,
       witness: witness?.id ?? null,
-      label: `⚠️ 正体発覚! ${agent.name}`,
+      label: `⚠️ 正体発覚! ${agent.name} → 牢屋で${this.cfg.detainTime}秒拘束`,
+    });
+    return true;
+  }
+
+  /** 発覚したスパイを警察署の牢屋へ移送して拘束する（移動・行動とも停止） */
+  detain(agent, witness) {
+    if (agent.carrying != null) {
+      const t = this.treasures[agent.carrying];
+      agent.carrying = null;
+      if (t) this.hideBackTreasure(t);
+    }
+    agent.hidden = false;
+    agent.hideLeft = 0;
+    agent.actionT = 0;
+    agent.path = null;
+    agent.moving = false;
+    agent.state = 'detained';
+    agent.detainLeft = this.cfg.detainTime;
+    agent.detainedFrom = agent.team;
+    const slot = this.freeJailSlot();
+    agent.jailSlot = slot;
+    agent.x = JAIL_SLOTS[slot].x;
+    agent.z = JAIL_SLOTS[slot].z;
+    agent.dir = Math.PI;
+    return agent;
+  }
+
+  /** 拘束が明けたスパイを見た目どおりの陣営へ強制転向（寝返り）させる */
+  betray(agent) {
+    if (!agent || agent.state !== 'detained') return false;
+    const next = betrayRoleOf(agent.role);
+    const from = agent.team;
+    agent.role = next;
+    agent.team = teamOf(next);
+    agent.isSpy = false;
+    agent.exposed = false;
+    agent.betrayUsed = true;
+    agent.state = 'free';
+    agent.jailSlot = -1;
+    agent.detainLeft = 0;
+    agent.immune = this.cfg.freeImmunity;
+    agent.actionT = 0;
+    agent.whistleCd = 0;
+    agent.unlockCd = 0;
+    agent.path = null;
+    agent.x = MAP.jailDoor.x + (this.rng() - 0.5) * 2;
+    agent.z = MAP.jailDoor.z - 1.8;
+    this.stats.defections++;
+    const toLabel = agent.team === 'cop' ? '警察' : '泥棒';
+    this.pushEvent({
+      type: 'betray',
+      by: agent.id,
+      from,
+      to: agent.team,
+      label: `🎭 ${agent.name}が${toLabel}へ寝返った!`,
     });
     return true;
   }
@@ -1054,6 +1170,7 @@ export class Game {
       thieves: thiefTeam.length,
       thiefFree: thiefTeam.filter((a) => a.state === 'free').length,
       jailed: thiefTeam.filter((a) => a.state === 'jailed').length,
+      detained: this.agents.filter((a) => a.state === 'detained').length,
       secured: this.securedCount,
       required: this.cfg.treasureRequired,
       treasuresLeft: this.treasures.filter((t) => t.state === 'vault').length,
@@ -1090,6 +1207,15 @@ export class Game {
       a.actionT = 0;
       a.moving = false;
       a.hidden = false;
+      return;
+    }
+    // スパイ発覚後の拘束：移動も行動もできず、時間が来たら相手陣営へ寝返る
+    if (a.state === 'detained') {
+      a.actionT = 0;
+      a.moving = false;
+      a.hidden = false;
+      a.detainLeft = Math.max(0, a.detainLeft - dt);
+      if (a.detainLeft <= 0) this.betray(a);
       return;
     }
     a.immune = Math.max(0, a.immune - dt);
@@ -1182,12 +1308,11 @@ export class Game {
       if (a.role === ROLE.COP_SPY && a.unlockCd <= 0) {
         acting = true;
         a.actionT += dt;
-        const witness = this.nearest(
-          a,
-          (o) => o.role === ROLE.COP && o.state === 'free' && dist(a, o) <= this.cfg.exposeRange,
-          this.cfg.exposeRange,
-        );
-        if (witness.agent && a.actionT > this.cfg.exposeAfter) this.expose(a, witness.agent);
+        const witness = this.witnessOf(a);
+        if (witness) {
+          if (a.actionT > this.cfg.exposeAfter) this.expose(a, witness);
+          return; // 拘束されたのでこのフレームの行動はここまで
+        }
         if (a.actionT >= this.cfg.actionTime) {
           a.actionT = 0;
           a.unlockCd = this.cfg.unlockCooldown;
@@ -1206,12 +1331,11 @@ export class Game {
     if (!acting && nearGate && act && a.role === ROLE.THIEF_SPY && this.securedCount > 0) {
       acting = true;
       a.actionT += dt;
-      const witness = this.nearest(
-        a,
-        (o) => o.role === ROLE.THIEF && o.state === 'free' && dist(a, o) <= this.cfg.exposeRange,
-        this.cfg.exposeRange,
-      );
-      if (witness.agent && a.actionT > this.cfg.exposeAfter) this.expose(a, witness.agent);
+      const witness = this.witnessOf(a);
+      if (witness) {
+        if (a.actionT > this.cfg.exposeAfter) this.expose(a, witness);
+        return; // 拘束されたのでこのフレームの行動はここまで
+      }
       if (a.actionT >= this.cfg.actionTime) {
         a.actionT = 0;
         this.returnTreasure(a);

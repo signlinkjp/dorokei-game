@@ -55,6 +55,14 @@ async function openPage(viewport, scale = 2) {
 async function shoot(page, file, waitMs = 500, prepare = null) {
   if (prepare) await page.evaluate(prepare);
   await page.waitForTimeout(waitMs);
+  // 撮る直前にカメラを合わせて1フレーム描く（ヘッドレスでは rAF が遅れることがある）
+  await page.evaluate(() => {
+    const w = window.__dorokei?.world;
+    if (!w) return;
+    w.snapCamera();
+    w.render();
+  });
+  await page.waitForTimeout(160);
   const target = path.join(OUT_DIR, file);
   await page.screenshot({ path: target });
   console.log('shot:', target);
@@ -66,6 +74,96 @@ const WIDE = { width: 1280, height: 720 };
 const ONLY = process.env.ONLY || '';
 
 const want = (name) => !ONLY || ONLY.split(',').includes(name);
+
+// ---- Build 3: タイトル（縦） -------------------------------------------------
+if (want('b3-title')) {
+  const page = await openPage(PHONE);
+  await page.goto(base, { waitUntil: 'load' });
+  await page.waitForTimeout(2600);
+  await shoot(page, 'dorokei-b3-title.png', 300);
+  await page.close();
+}
+
+// ---- Build 3: プレイ画面（横・HUDと役カード） --------------------------------
+if (want('b3-play')) {
+  const page = await openPage({ width: 932, height: 430 });
+  await page.goto(`${base}?demo=1&team=thief&self=never&spy=both&seed=9&warp=40&hud=1`, {
+    waitUntil: 'load',
+  });
+  await page.waitForTimeout(2200);
+  const info = await page.evaluate(() => {
+    const { game, world } = window.__dorokei;
+    window.__dorokei.freeze(true); // 見やすい瞬間で止めて構図を整える
+    const p = game.player;
+    // 駅前の広場：泥棒がお宝を運び、警察が追ってくる絵にする
+    p.state = 'free';
+    p.x = -22;
+    p.z = 0;
+    p.dir = Math.PI;
+    const cop = game.agents.find((a) => a.looks === 'cop' && a.state === 'free');
+    if (cop) {
+      cop.x = -14.5;
+      cop.z = 6;
+      cop.dir = Math.atan2(-22 + 14.5, 0 - 6);
+    }
+    const mate = game.agents.find((a) => a !== p && a.role === 'thief' && a.state === 'free');
+    if (mate) {
+      mate.x = -28;
+      mate.z = -4;
+      mate.dir = Math.PI * 0.8;
+    }
+    const t0 = game.treasures.find((t) => t.state === 'vault') || game.treasures[0];
+    t0.state = 'carried';
+    t0.carrier = p.id;
+    p.carrying = t0.id;
+    world.setView('follow');
+    world.snapCamera();
+    return {
+      role: p.role,
+      team: p.team,
+      spyMode: game.spyMode,
+      counts: game.counts(),
+      card: {
+        tag: document.getElementById('roleTag').textContent,
+        mission: document.getElementById('roleText').textContent,
+      },
+      button: document.getElementById('actionBtn').textContent,
+    };
+  });
+  console.log('b3-play:', JSON.stringify(info));
+  await shoot(page, 'dorokei-b3-play.png', 400);
+  await page.close();
+}
+
+// ---- Build 3: 牢屋で15秒拘束中（スティックで見渡す俯瞰） ---------------------
+if (want('b3-jail')) {
+  const page = await openPage({ width: 932, height: 430 });
+  await page.goto(
+    `${base}?demo=1&team=thief&self=always&spy=thieves&seed=5&warp=6&hud=1&jail=1&detain=2`,
+    { waitUntil: 'load' },
+  );
+  await page.waitForTimeout(2600);
+  const info = await page.evaluate(() => {
+    const { game, world } = window.__dorokei;
+    world.centerJailView();
+    // 牢屋（左）と街の通り・ゲート（右）が両方入るように少しだけ街側へパン
+    world.panLookBy(34, 12);
+    game.stepSeconds(0.5);
+    return {
+      state: game.player.state,
+      detainLeft: +game.player.detainLeft.toFixed(1),
+      pan: { ...world.lookPan },
+      card: {
+        tag: document.getElementById('roleTag').textContent,
+        mission: document.getElementById('roleText').textContent,
+        chip: document.getElementById('roleChip').textContent,
+      },
+    };
+  });
+  console.log('b3-jail:', JSON.stringify(info));
+  await shoot(page, 'dorokei-b3-jail.png', 300);
+  await page.close();
+}
 
 // ---- タイトル（日本語） ---------------------------------------------------
 if (want('title')) {

@@ -1,0 +1,305 @@
+# ============================================================
+# Build 3 用ワークフロー（トモアキさんが Safari で貼り付ける用）
+#
+# GitHub連携の権限ではワークフローファイルを直接更新できないため、
+# このファイルの中身をそのままコピーして
+#   .github/workflows/ios-testflight-build1.yml
+# を上書きしてください（Build 1・2 と同じ手順）。
+# 貼り付けるまで、既存ワークフローの preflight は
+# 「CURRENT_PROJECT_VERSION = 3」と Build 2 の「= 2」の不一致で止まるので、
+# 古いビルド番号が TestFlight に出ることはありません。
+#
+# ※ 1行目は必ず「# 」で始まる YAML コメントのままにしてください。
+# ============================================================
+# DOROKEI — iOS TestFlight ビルド＆配信（Build 3）
+#
+# 使い方（トモアキさん向け）:
+#   Actions →「DOROKEI iOS TestFlight」→ Run workflow
+#     - confirm_bundle_id に `jp.signlink.Dorokei`
+#     - upload_to_testflight は true（TestFlight へ配信）
+#   ※ ビルド番号は下の BUILD_NUMBER で管理します（Build 3 = 3）。
+#   ※ Build 3 は決定版アイコン・警察署の中の牢屋・15秒拘束→寝返り・HUD整理を含みます。
+#
+# 必要な Secrets（Repository secrets / 既存リポジトリと同じ値）:
+#   APPLE_TEAM_ID                   … 例 TGBNH8WJV6
+#   APPSTORE_CONNECT_KEY_ID         … App Store Connect API キーの Key ID（ASC_API_KEY_ID でも可）
+#   APPSTORE_CONNECT_ISSUER_ID      … Issuer ID（ASC_API_ISSUER_ID でも可）
+#   APPSTORE_CONNECT_PRIVATE_KEY    … AuthKey_*.p8 の中身（ASC_API_KEY_P8 でも可）
+
+name: DOROKEI iOS TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_bundle_id:
+        description: "確認のため bundle ID を入力: jp.signlink.Dorokei"
+        required: true
+        type: string
+        default: "jp.signlink.Dorokei"
+      upload_to_testflight:
+        description: "TestFlight へアップロードする（false = 署名済みIPAの作成まで）"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dorokei-ios-testflight
+  cancel-in-progress: false
+
+env:
+  BUNDLE_ID: jp.signlink.Dorokei
+  MARKETING_VERSION: "1.0.0"
+  BUILD_NUMBER: "3"
+
+jobs:
+  preflight:
+    name: Web preflight（テストと構成チェック）
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Confirm run intent
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          CONFIRM: ${{ inputs.confirm_bundle_id }}
+        run: |
+          set -euo pipefail
+          test "$CONFIRM" = "$BUNDLE_ID"
+
+      - name: Install web dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run the DOROKEI rule tests
+        run: npm test
+
+      - name: Guard the shipped game files
+        run: |
+          set -euo pipefail
+          node --check www/src/core.js
+          node --check www/src/render.js
+          node --check www/src/main.js
+          node --check www/src/minimap.js
+          node --check www/src/audio.js
+          node --check www/src/i18n.js
+          node --check www/src/stages.js
+          test -f www/vendor/three.module.js
+          grep -q 'id="minimap"' www/index.html
+          grep -q 'DOROKEI' www/index.html
+          grep -q '150' www/src/core.js
+          # Build 2: 茂みは5秒・クールタイム3秒／警察の捜索／音・言語・ステージ
+          grep -q 'hideMax: 5' www/src/core.js
+          grep -q 'hideCooldown: 3' www/src/core.js
+          grep -q 'searchRadius: 4.5' www/src/core.js
+          grep -q 'id="hideGauge"' www/index.html
+          grep -q 'id="stageGrid"' www/index.html
+          grep -q 'data-panel="privacy"' www/index.html
+          # Build 3: 15秒拘束→寝返り／役とミッションの常時表示／MENU／警察署の中の牢屋
+          grep -q 'detainTime: 15' www/src/core.js
+          grep -q 'spyNameKey' www/src/core.js
+          grep -q 'role.spyUnified' www/src/i18n.js
+          grep -q 'id="roleCard"' www/index.html
+          grep -q 'id="menuBtn"' www/index.html
+          grep -q 'id="noteRail"' www/index.html
+          grep -q "kind: 'police'" www/src/core.js
+          test -f test/build3.test.js
+          grep -q 'WebAudio\|AudioContext' www/src/audio.js
+          test -f www/src/audio.js
+          test -f www/src/i18n.js
+          test -f www/src/stages.js
+          echo "DOROKEI web assets OK"
+
+      - name: Guard the iOS project contract
+        run: |
+          set -euo pipefail
+          test -f ios/App/App.xcodeproj/project.pbxproj
+          test -f ios/App/App/Info.plist
+          test -f ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
+          test -f ios/App/App.xcodeproj/xcshareddata/xcschemes/App.xcscheme
+          python3 - <<'PY'
+          import plistlib, pathlib
+          plist = plistlib.loads(pathlib.Path('ios/App/App/Info.plist').read_bytes())
+          assert plist['CFBundleDisplayName'] == 'DOROKEI', plist['CFBundleDisplayName']
+          pbx = pathlib.Path('ios/App/App.xcodeproj/project.pbxproj').read_text()
+          assert 'PRODUCT_BUNDLE_IDENTIFIER = jp.signlink.Dorokei;' in pbx
+          assert 'MARKETING_VERSION = 1.0.0;' in pbx
+          assert 'CURRENT_PROJECT_VERSION = 3;' in pbx
+          print('iOS project contract OK')
+          PY
+
+  testflight:
+    name: Xcode で署名 → IPA → TestFlight
+    needs: preflight
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # 新リポジトリ用の名前を優先し、無ければ既存リポジトリと同じ名前から読む
+      ASC_KEY_ID: ${{ secrets.APPSTORE_CONNECT_KEY_ID || secrets.ASC_API_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID || secrets.ASC_API_ISSUER_ID }}
+      ASC_PRIVATE_KEY: ${{ secrets.APPSTORE_CONNECT_PRIVATE_KEY || secrets.ASC_API_KEY_P8 }}
+      UPLOAD: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_to_testflight || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify Apple secret contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$TEAM_ID" || { echo "::error::APPLE_TEAM_ID が未設定です"; exit 1; }
+          test -n "$ASC_KEY_ID" || { echo "::error::APPSTORE_CONNECT_KEY_ID（または ASC_API_KEY_ID）が未設定です"; exit 1; }
+          test -n "$ASC_ISSUER_ID" || { echo "::error::APPSTORE_CONNECT_ISSUER_ID（または ASC_API_ISSUER_ID）が未設定です"; exit 1; }
+          test -n "$ASC_PRIVATE_KEY" || { echo "::error::APPSTORE_CONNECT_PRIVATE_KEY（または ASC_API_KEY_P8）が未設定です"; exit 1; }
+          echo "Secrets present."
+
+      - name: Xcode environment
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Write the App Store Connect key
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH_KEY_PATH="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
+          export AUTH_KEY_PATH
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          value = os.environ["ASC_PRIVATE_KEY"]
+          value = value.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n").strip()
+          if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+              value = value[1:-1].strip()
+          if "\\n" in value and "\n" not in value:
+              value = value.replace("\\n", "\n")
+          if "-----BEGIN" not in value:
+              try:
+                  decoded = base64.b64decode("".join(value.split()), validate=True).decode("utf-8")
+                  if "-----BEGIN" in decoded:
+                      value = decoded.strip()
+              except Exception:
+                  pass
+          Path(os.environ["AUTH_KEY_PATH"]).write_text(value + "\n", encoding="utf-8")
+          PY
+          chmod 600 "$AUTH_KEY_PATH"
+          if ! openssl pkey -in "$AUTH_KEY_PATH" -noout >/dev/null 2>&1; then
+            echo "::error::ASC_PRIVATE_KEY が正しい .p8（PEM秘密鍵）ではありません。AuthKey_*.p8 の中身を丸ごとコピーしてください。"
+            exit 1
+          fi
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          cp "$AUTH_KEY_PATH" "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          echo "AUTH_KEY_PATH=$AUTH_KEY_PATH" >> "$GITHUB_ENV"
+
+      - name: Install web dependencies and sync Capacitor
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npx cap sync ios
+          test -f ios/App/App/public/index.html
+          test -f ios/App/App/public/src/core.js
+          test -f ios/App/App/public/vendor/three.module.js
+          echo "Capacitor sync OK"
+
+      - name: Archive (Xcode cloud signing)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/release
+          set -o pipefail
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -archivePath "$PWD/build/release/DOROKEI.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$AUTH_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            MARKETING_VERSION="$MARKETING_VERSION" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            clean archive | tee build/release/archive.log
+
+      - name: Export App Store Connect IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>teamID</key>
+            <string>$TEAM_ID</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key>
+            <false/>
+            <key>uploadSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          PLIST
+          set -o pipefail
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$PWD/build/release/DOROKEI.xcarchive" \
+            -exportPath "$PWD/build/release/export" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$AUTH_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            | tee build/release/export.log
+          IPA_PATH=$(find "$PWD/build/release/export" -maxdepth 1 -name "*.ipa" -print -quit)
+          test -n "$IPA_PATH"
+          echo "IPA_PATH=$IPA_PATH" >> "$GITHUB_ENV"
+          shasum -a 256 "$IPA_PATH" | tee build/release/IPA_SHA256.txt
+
+      - name: Validate the IPA with App Store Connect
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun altool --validate-app -f "$IPA_PATH" -t ios \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" \
+            --output-format json | tee build/release/altool-validate.json
+
+      - name: Upload to TestFlight
+        if: ${{ env.UPLOAD == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun altool --upload-app -f "$IPA_PATH" -t ios \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" \
+            --output-format json | tee build/release/altool-upload.json
+
+      - name: Keep the build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dorokei-testflight-build3-evidence
+          path: |
+            build/release/*.log
+            build/release/*.json
+            build/release/IPA_SHA256.txt
+          if-no-files-found: warn
+          retention-days: 30

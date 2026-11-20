@@ -1,7 +1,8 @@
-// DOROKEI — UI / ゲームループ（Build 2）
+// DOROKEI — UI / ゲームループ（Build 3）
 // 音（Web Audio）・言語・ステージ選択・設定／あそびかた／プライバシーのモーダル、
-// 茂みの残り秒数ゲージ、警察の「🔍 捜索」ボタンをまとめて面倒みる。
-import { Game, ROLE, MAP, CFG } from './core.js';
+// 茂みの残り秒数ゲージ、警察の「🔍 捜索」、自分の役とミッションの常時表示、
+// プレイ中の MENU（タイトルへ戻る）、牢屋・拘束中のスティック俯瞰カメラをまとめて面倒みる。
+import { Game, ROLE, MAP, CFG, spyNameKey, spyDescKey } from './core.js';
 import { World } from './render.js';
 import { Minimap } from './minimap.js';
 import { AudioEngine, pickSfx } from './audio.js';
@@ -24,9 +25,11 @@ const ui = {
   lootCount: $('lootCount'),
   viewBtn: $('viewBtn'),
   soundBtn: $('soundBtn'),
-  roleBanner: $('roleBanner'),
+  menuBtn: $('menuBtn'),
+  roleCard: $('roleCard'),
   roleTag: $('roleTag'),
   roleText: $('roleText'),
+  roleChip: $('roleChip'),
   eventFeed: $('eventFeed'),
   gauge: $('gauge'),
   gaugeLabel: $('gaugeLabel'),
@@ -57,6 +60,18 @@ const ui = {
   settingsBtn: $('settingsBtn'),
   privacyBtn: $('privacyBtn'),
   privacyBtn2: $('privacyBtn2'),
+  pause: $('pause'),
+  pauseClose: $('pauseClose'),
+  pauseResume: $('pauseResume'),
+  pauseHome: $('pauseHome'),
+  pauseHomeYes: $('pauseHomeYes'),
+  pauseHomeNo: $('pauseHomeNo'),
+  pauseConfirm: $('pauseConfirm'),
+  pauseSound: $('pauseSound'),
+  pauseHowto: $('pauseHowto'),
+  pauseSettings: $('pauseSettings'),
+  pauseRoleTag: $('pauseRoleTag'),
+  pauseRoleMission: $('pauseRoleMission'),
 };
 
 // ---- 設定（端末内に保存） -------------------------------------------------
@@ -100,7 +115,8 @@ let game = null;
 let mode = 'title'; // title | playing | ended
 let shownEvents = 0;
 let eventTimer = 0;
-let bannerTimer = 0;
+let defectNotice = 0; // 寝返り直後のチップ表示（秒）
+let paused = false; // MENU を開いている間はゲームを止める
 let frozen = false; // ?chars=1 のキャラ撮影用に時計を止める
 
 // ---- タイトル背景用のデモシーン -------------------------------------------
@@ -120,23 +136,96 @@ function lang() {
   return settings.lang;
 }
 
-function roleInfo(role) {
-  switch (role) {
-    case ROLE.COP:
-      return { tag: t('role.cop', lang()), cls: 'cop', text: t('role.cop.desc', lang()) };
-    case ROLE.COP_SPY:
-      return { tag: t('role.copSpy', lang()), cls: 'spy-cop', text: t('role.copSpy.desc', lang()) };
-    case ROLE.THIEF:
-      return { tag: t('role.thief', lang()), cls: 'thief', text: t('role.thief.desc', lang()) };
-    case ROLE.THIEF_SPY:
-      return { tag: t('role.thiefSpy', lang()), cls: 'spy-thief', text: t('role.thiefSpy.desc', lang()) };
-    default:
-      return { tag: '', cls: '', text: '' };
-  }
-}
-
 function stageName(s) {
   return lang() === 'ja' ? s.nameJa || s.name : s.nameEn || s.name;
+}
+
+// ---- 自分の役とやるべきこと（Build 3） ------------------------------------
+// 役目が変わるゲームなので、左上のカードに「役」＋「1行ミッション」を常に出し、
+// 拘束→寝返りの瞬間もそのまま切り替わる。
+const MISSION_KEY = {
+  [ROLE.COP]: 'mission.cop',
+  [ROLE.THIEF]: 'mission.thief',
+  [ROLE.COP_SPY]: 'mission.copSpy',
+  [ROLE.THIEF_SPY]: 'mission.thiefSpy',
+};
+
+function roleClass(role) {
+  if (role === ROLE.COP) return 'cop';
+  if (role === ROLE.THIEF) return 'thief';
+  if (role === ROLE.COP_SPY) return 'spy-cop';
+  if (role === ROLE.THIEF_SPY) return 'spy-thief';
+  return 'cop';
+}
+
+function roleTagKey(p) {
+  if (p.isSpy) return spyNameKey(p.role, game?.spyMode || settings.spyMode) || 'role.cop';
+  return p.role === ROLE.COP ? 'role.cop' : 'role.thief';
+}
+
+function missionKeyOf(role) {
+  return MISSION_KEY[role] || 'mission.cop';
+}
+
+/**
+ * カードの中身を組み立てる。
+ * state: free | jailed | detained
+ * sig が変わった時だけ DOM を書き換える（毎フレームのチラつきを防ぐ）
+ */
+function roleCardView(p) {
+  if (!p) return null;
+  const teamWord = (team) => t(team === 'cop' ? 'team.cop' : 'team.thief', lang());
+  if (p.state === 'detained') {
+    const toTeam = p.looks === 'cop' ? 'cop' : 'thief';
+    const secs = Math.max(0, Math.ceil(p.detainLeft || 0));
+    return {
+      cls: 'detained',
+      tag: t('role.detainedTag', lang()),
+      mission: t('role.detainedMission', lang())
+        .replace('{n}', String(secs))
+        .replace('{team}', teamWord(toTeam)),
+      chip: t('role.detainedHint', lang()),
+      sig: `detained|${secs}|${toTeam}`,
+    };
+  }
+  if (p.state === 'jailed') {
+    return {
+      cls: 'detained',
+      tag: t('hud.jail', lang()),
+      mission: t('role.jailedMission', lang()),
+      chip: t('role.detainedHint', lang()),
+      sig: 'jailed',
+    };
+  }
+  const isSpy = !!p.isSpy;
+  const tag = t(roleTagKey(p), lang());
+  const mission = t(missionKeyOf(p.role), lang());
+  let chip = '';
+  if (defectNotice > 0) chip = t('role.defectedChip', lang()).replace('{team}', teamWord(p.team));
+  return { cls: roleClass(p.role), tag, mission, chip, sig: `${p.role}|${isSpy}|${chip}` };
+}
+
+let roleSig = '';
+function refreshRoleCard(force = false) {
+  if (!game) return;
+  const p = game.player;
+  const view = roleCardView(p);
+  if (!view) return;
+  if (!force && view.sig === roleSig) return;
+  roleSig = view.sig;
+  ui.roleCard.className = `role-card ${view.cls}`;
+  ui.roleTag.textContent = view.tag;
+  ui.roleText.textContent = view.mission;
+  ui.roleChip.textContent = view.chip || '';
+  ui.roleChip.classList.toggle('hidden', !view.chip);
+  if (ui.pauseRoleTag) ui.pauseRoleTag.textContent = view.tag;
+  if (ui.pauseRoleMission) ui.pauseRoleMission.textContent = view.mission;
+}
+
+function spyNoteFor(p) {
+  const mode = game?.spyMode || settings.spyMode;
+  const key = spyDescKey(p.role, mode);
+  return key ? t(key, lang()) : '';
 }
 
 function buildLangSelect() {
@@ -193,9 +282,8 @@ function syncDynamicLabels() {
       ? '物陰に隠れている（動くと出る・最大5秒）'
       : 'Hidden — move to come out (up to 5s)';
   if (game) {
-    const info = roleInfo(game.player.role);
-    ui.roleTag.textContent = info.tag;
-    ui.roleText.textContent = info.text;
+    roleSig = '';
+    refreshRoleCard(true);
   }
   // ボタンの文言キャッシュを捨てて次のフレームで作り直す
   delete ui.actionBtn.dataset.label;
@@ -309,7 +397,10 @@ ui.modal.addEventListener('click', (e) => {
   if (e.target.closest('[data-close]')) closeModal();
 });
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'Escape' && !ui.modal.classList.contains('hidden')) closeModal();
+  if (e.code === 'Escape') {
+    if (!ui.pause.classList.contains('hidden')) closePause();
+    else if (!ui.modal.classList.contains('hidden')) closeModal();
+  }
 });
 
 // ---- ゲームの開始・終了 ---------------------------------------------------
@@ -326,23 +417,14 @@ function startGame(opts = {}) {
   });
   shownEvents = 0;
   ui.eventFeed.innerHTML = '';
-  bannerTimer = 0;
+  defectNotice = 0;
   frozen = false;
 
   const p = game.player;
-  const info = roleInfo(p.role);
-  ui.roleBanner.className = `role-banner ${info.cls}`;
-  ui.roleTag.textContent = info.tag;
-  ui.roleText.textContent = info.text;
-  ui.roleBanner.classList.remove('faded');
-  bannerTimer = 5.0;
+  roleSig = '';
+  refreshRoleCard(true);
   ui.spyNote.classList.toggle('hidden', !p.isSpy);
-  if (p.isSpy) {
-    ui.spyNote.textContent =
-      p.role === ROLE.COP_SPY
-        ? '内通者：牢屋の前で長押し＝解錠（警官に見られると発覚）'
-        : '密告者：ボタンで密告／ゲート前で長押し＝お宝を奪い返す';
-  }
+  if (p.isSpy) ui.spyNote.textContent = spyNoteFor(p);
   ui.hiddenNote.classList.add('hidden');
 
   world.setGame(game);
@@ -399,22 +481,71 @@ function endGame() {
   ui.result.dataset.youWin = String(youWin);
 }
 
-ui.startBtn.addEventListener('click', () => {
-  audio.unlock();
-  audio.play('tap');
-  startGame();
-});
-ui.againBtn.addEventListener('click', () => startGame());
-ui.homeBtn.addEventListener('click', () => {
+function returnToTitle() {
   mode = 'title';
+  paused = false;
   audio.stopMusic();
+  ui.pause.classList.add('hidden');
   ui.result.classList.add('hidden');
   ui.title.classList.remove('hidden');
   ui.hud.classList.add('hidden');
   world.setGame(showcase);
   world.setView('map');
   world.snapCamera();
+}
+
+// ---- プレイ中の MENU -------------------------------------------------------
+function openPause() {
+  if (mode !== 'playing') return;
+  paused = true;
+  ui.pauseConfirm.classList.add('hidden');
+  applyI18n(ui.pause, settings.lang);
+  ui.pauseSound.textContent = `${audio.enabled ? '🔊' : '🔇'} ${t('menu.sound', lang())}`;
+  refreshRoleCard(true);
+  ui.pause.classList.remove('hidden');
+  audio.play('tap');
+}
+
+function closePause() {
+  paused = false;
+  ui.pause.classList.add('hidden');
+}
+
+ui.menuBtn.addEventListener('click', openPause);
+ui.pauseClose.addEventListener('click', closePause);
+ui.pauseResume.addEventListener('click', () => {
+  audio.play('tap');
+  closePause();
 });
+ui.pause.addEventListener('click', (e) => {
+  if (e.target === ui.pause) closePause();
+});
+ui.pauseHome.addEventListener('click', () => {
+  audio.play('tap');
+  ui.pauseConfirm.classList.remove('hidden');
+});
+ui.pauseHomeNo.addEventListener('click', () => {
+  audio.play('tap');
+  ui.pauseConfirm.classList.add('hidden');
+});
+ui.pauseHomeYes.addEventListener('click', () => {
+  audio.play('tap');
+  returnToTitle();
+});
+ui.pauseSound.addEventListener('click', () => {
+  setSound(!settings.sound);
+  ui.pauseSound.textContent = `${audio.enabled ? '🔊' : '🔇'} ${t('menu.sound', lang())}`;
+});
+ui.pauseHowto.addEventListener('click', () => openModal('howto'));
+ui.pauseSettings.addEventListener('click', () => openModal('settings'));
+
+ui.startBtn.addEventListener('click', () => {
+  audio.unlock();
+  audio.play('tap');
+  startGame();
+});
+ui.againBtn.addEventListener('click', () => startGame());
+ui.homeBtn.addEventListener('click', () => returnToTitle());
 
 ui.viewBtn.addEventListener('click', () => {
   const v = world.toggleView();
@@ -438,7 +569,16 @@ window.addEventListener('keyup', (e) => {
 });
 
 let stickPointer = null;
+let stickVec = { x: 0, z: 0 };
 const STICK_MAX = 44;
+const PAN_SPEED = 34; // 牢屋ビューのパン速度（m/秒）
+
+/** 牢屋・拘束中はキャラを動かさず、スティックで俯瞰カメラだけを動かす */
+function cameraOnlyMode() {
+  const p = game?.player;
+  return !!p && (p.state === 'jailed' || p.state === 'detained');
+}
+
 function stickMove(e) {
   const rect = ui.stick.getBoundingClientRect();
   const cx = rect.left + rect.width / 2;
@@ -451,12 +591,14 @@ function stickMove(e) {
     dy = (dy / len) * STICK_MAX;
   }
   ui.knob.style.transform = `translate(${dx}px, ${dy}px)`;
-  game?.setPlayerMove(dx / STICK_MAX, dy / STICK_MAX);
+  stickVec = { x: dx / STICK_MAX, z: dy / STICK_MAX };
+  if (!cameraOnlyMode()) game?.setPlayerMove(stickVec.x, stickVec.z);
 }
 function stickReset() {
   stickPointer = null;
+  stickVec = { x: 0, z: 0 };
   ui.knob.style.transform = 'translate(0px, 0px)';
-  game?.setPlayerMove(0, 0);
+  if (!cameraOnlyMode()) game?.setPlayerMove(0, 0);
 }
 ui.stick.addEventListener('pointerdown', (e) => {
   audio.unlock();
@@ -489,6 +631,9 @@ function actionLabel(p) {
   const nearDoor = Math.hypot(p.x - MAP.jailDoor.x, p.z - MAP.jailDoor.z) < game.cfg.actionRange;
   const nearGate = Math.hypot(p.x - MAP.gate.x, p.z - MAP.gate.z) < game.cfg.returnRange;
   const jailedCount = game.jailedTeammates(p).length;
+  if (p.state === 'detained') {
+    return { text: `${Math.max(0, Math.ceil(p.detainLeft))}s`, cls: 'cooldown' };
+  }
   if (p.state === 'jailed') return { text: t('hud.jail', lang()), cls: '' };
   if (p.role === ROLE.COP) {
     if (game.canSearch(p)) return { text: t('search.ready', lang()), cls: 'search' };
@@ -582,9 +727,17 @@ function updateHud(dt) {
 
   ui.hiddenNote.classList.toggle('hidden', !p.hidden);
 
-  if (bannerTimer > 0) {
-    bannerTimer -= dt;
-    if (bannerTimer <= 0) ui.roleBanner.classList.add('faded');
+  // 役・状態が変わった瞬間にカードを切り替える（拘束カウントダウンも毎秒更新）
+  refreshRoleCard();
+  if (defectNotice > 0) {
+    defectNotice = Math.max(0, defectNotice - dt);
+    if (defectNotice === 0) refreshRoleCard(true);
+  }
+  // スパイの案内（寝返り後は消す）
+  ui.spyNote.classList.toggle('hidden', !p.isSpy);
+  if (p.isSpy) {
+    const note = spyNoteFor(p);
+    if (ui.spyNote.textContent !== note) ui.spyNote.textContent = note;
   }
 
   // イベントフィード（新しいイベントに効果音を付ける）
@@ -598,6 +751,17 @@ function updateHud(dt) {
       ui.eventFeed.appendChild(div);
       const sfx = pickSfx(e, game.player?.team);
       if (sfx) audio.play(sfx);
+      // 自分が発覚・寝返りしたらカードを即切り替える
+      if (game.player && e.by === game.player.id) {
+        if (e.type === 'betray') {
+          defectNotice = 6;
+          roleSig = '';
+          refreshRoleCard(true);
+        } else if (e.type === 'expose') {
+          roleSig = '';
+          refreshRoleCard(true);
+        }
+      }
     }
     while (ui.eventFeed.children.length > 4) ui.eventFeed.firstElementChild.remove();
   }
@@ -628,9 +792,14 @@ function frame(now) {
     world.update(showcase, dt);
     world.render();
   } else if (game) {
-    if (mode === 'playing' && !frozen) {
-      if (stickPointer === null) {
-        const k = keyboardMove();
+    if (mode === 'playing' && !frozen && !paused) {
+      const k = keyboardMove();
+      if (cameraOnlyMode()) {
+        // 牢屋・拘束中：スティック／矢印キーで俯瞰カメラをパンする
+        const sx = stickVec.x + k.x;
+        const sz = stickVec.z + k.z;
+        if (sx || sz) world.panLookBy(sx * PAN_SPEED * dt, sz * PAN_SPEED * dt);
+      } else if (stickPointer === null) {
         game.setPlayerMove(k.x, k.z);
       }
       game.step(dt);
@@ -682,7 +851,6 @@ function showCharacters(params) {
   frozen = true;
   ui.hud.classList.add('hidden');
   ui.title.classList.add('hidden');
-  ui.roleBanner.classList.add('hidden');
 }
 
 // ---- デモ / スクリーンショット用 -----------------------------------------
@@ -703,6 +871,17 @@ if (params.get('chars')) {
   });
   if (['top', 'map'].includes(params.get('view'))) ui.viewBtn.textContent = t('hud.follow', lang());
   ui.hud.classList.toggle('hidden', params.get('hud') === '0');
+
+  // 牢屋・拘束中のスクリーンショット用（?jail=1）
+  if (params.get('jail') && game) {
+    const p = game.player;
+    const witness = game.agents.find((a) => a !== p && a.state === 'free' && a.team !== p.team);
+    if (p.isSpy) game.expose(p, witness);
+    const after = Number(params.get('detain') || 2);
+    if (after > 0) game.stepSeconds(after);
+    world.centerJailView();
+    world.snapCamera();
+  }
 }
 
 window.__dorokei = {
@@ -717,8 +896,14 @@ window.__dorokei = {
   showcase,
   openModal,
   closeModal,
+  openPause,
+  closePause,
+  returnToTitle,
   setLang,
   setSound,
+  get paused() {
+    return paused;
+  },
   freeze(on) {
     frozen = !!on;
   },

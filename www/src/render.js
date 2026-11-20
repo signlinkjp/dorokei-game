@@ -121,7 +121,58 @@ const ROOF_TINT = {
   kiosk: 0xffd24d,
   pavilion: 0xc0392b,
   wall: 0xcbbf9e,
+  police: 0x2f6fd8,
 };
+
+/**
+ * 牢屋（警察署の中庭）の床テクスチャ。
+ * 白いタイル＋青い目地で「警察署の中」らしく、中央に JAIL の文字を入れて
+ * 上から見ても牢屋だとひと目で分かるようにする。
+ */
+function jailFloorTexture() {
+  const W = 512;
+  const H = 410;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d');
+  // 下地（明るい白青）
+  const base = g.createLinearGradient(0, 0, 0, H);
+  base.addColorStop(0, '#ffffff');
+  base.addColorStop(1, '#e8f1fc');
+  g.fillStyle = base;
+  g.fillRect(0, 0, W, H);
+  // タイル目地
+  g.strokeStyle = 'rgba(120,160,215,0.35)';
+  g.lineWidth = 2;
+  const tile = 64;
+  for (let x = 0; x <= W; x += tile) {
+    g.beginPath();
+    g.moveTo(x, 0);
+    g.lineTo(x, H);
+    g.stroke();
+  }
+  for (let y = 0; y <= H; y += tile) {
+    g.beginPath();
+    g.moveTo(0, y);
+    g.lineTo(W, y);
+    g.stroke();
+  }
+  // 外周の青い帯
+  g.strokeStyle = '#2f6fd8';
+  g.lineWidth = 12;
+  g.strokeRect(6, 6, W - 12, H - 12);
+  // 中央の JAIL
+  g.fillStyle = 'rgba(47,111,216,0.30)';
+  g.font = 'bold 112px "Liberation Sans", "Helvetica Neue", system-ui, sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText('JAIL', W / 2, H / 2);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
 
 export class World {
   constructor(canvas) {
@@ -153,6 +204,9 @@ export class World {
     this.searchMeshes = [];
     this.charFocus = { x: 0, z: 20 };
     this.playerRing = null;
+    // 牢屋・拘束中の俯瞰カメラ（スティックで街を見渡せる）
+    this.lookPan = { x: MAP.jail.x, z: MAP.jail.z };
+    this._inJailView = false;
 
     this.buildLights();
     this.buildGround();
@@ -470,24 +524,85 @@ export class World {
     }
   }
 
+  /**
+   * 警察署＋牢屋（Build 3）
+   * 牢屋は警察署の中庭として一体化：明るい白い床＋タイル目地、白壁＋青い帯、
+   * ぐるりと囲む屋根（中央は吹き抜け）、投光照明、入口のゲートと看板。
+   * 上から見ると「警察署の中の牢屋」がひと目で分かり、中の様子も明るく見える。
+   */
   buildJail() {
     const jail = MAP.jail;
+
+    // ---- 明るい牢屋の床（タイル＋JAILの文字） ----
+    const floorTex = jailFloorTexture();
     const floor = new THREE.Mesh(
-      new THREE.BoxGeometry(jail.w, 0.35, jail.d),
-      new THREE.MeshLambertMaterial({ color: 0x6f7c90 }),
+      new THREE.BoxGeometry(jail.w, 0.2, jail.d),
+      new THREE.MeshLambertMaterial({
+        map: floorTex,
+        color: 0xffffff,
+        emissive: 0x8fb6e0,
+        emissiveIntensity: 0.22,
+      }),
     );
-    floor.position.set(jail.x, 0.17, jail.z);
+    floor.position.set(jail.x, 0.1, jail.z);
     this.scene.add(floor);
 
-    // 監視塔のような柱
-    const wallMat = new THREE.MeshLambertMaterial({ color: 0xdbe3ee });
+    // 床の明かり（牢屋の中を明るく照らす）
+    this.jailLight = new THREE.PointLight(0xfff6e2, 2.6, 40, 1.5);
+    this.jailLight.position.set(jail.x, 8.5, jail.z);
+    this.scene.add(this.jailLight);
+    const jailFill = new THREE.PointLight(0xdff0ff, 1.4, 30, 1.6);
+    jailFill.position.set(jail.x, 5.5, jail.z + 5);
+    this.scene.add(jailFill);
+
+    // ---- 壁（白い警察署の壁＋青い帯） ----
+    const wallMat = new THREE.MeshLambertMaterial({ color: 0xf2f6fc });
+    const stripeMat = new THREE.MeshLambertMaterial({ color: 0x2f6fd8 });
     for (const w of MAP.jailWalls) {
       const m = new THREE.Mesh(new THREE.BoxGeometry(w.w, w.h, w.d), wallMat);
       m.position.set(w.x, w.h / 2, w.z);
       this.scene.add(m);
+      // 外側に青い帯（警察署らしい見た目）
+      const alongX = w.w > w.d;
+      const stripe = new THREE.Mesh(
+        new THREE.BoxGeometry(alongX ? w.w + 0.06 : w.w + 0.12, 0.5, alongX ? w.d + 0.12 : w.d + 0.06),
+        stripeMat,
+      );
+      stripe.position.set(w.x, w.h - 0.55, w.z);
+      this.scene.add(stripe);
     }
+
+    // ---- 屋根（中央が吹き抜けの「口」の字）で警察署の建物らしく ----
+    const roofMat = new THREE.MeshLambertMaterial({ color: 0x3b5f9e });
+    const roofEdge = new THREE.MeshLambertMaterial({ color: 0x27406f });
+    const ring = 2.4;
+    const roofY = 4.35;
+    const pieces = [
+      { x: jail.x, z: jail.z + jail.d / 2 - ring / 2, w: jail.w + 1.6, d: ring },
+      { x: jail.x, z: jail.z - jail.d / 2 + ring / 2, w: jail.w + 1.6, d: ring },
+      { x: jail.x - jail.w / 2 + ring / 2, z: jail.z, w: ring, d: jail.d + 1.6 - ring * 2 },
+      { x: jail.x + jail.w / 2 - ring / 2, z: jail.z, w: ring, d: jail.d + 1.6 - ring * 2 },
+    ];
+    for (const p of pieces) {
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(p.w, 0.45, p.d), roofMat);
+      slab.position.set(p.x, roofY, p.z);
+      const lip = new THREE.Mesh(new THREE.BoxGeometry(p.w + 0.3, 0.16, p.d + 0.3), roofEdge);
+      lip.position.set(p.x, roofY + 0.3, p.z);
+      this.scene.add(slab, lip);
+    }
+    // 屋上の小物（空調）
+    for (const dx of [-6, 0, 6]) {
+      const ac = new THREE.Mesh(
+        new THREE.BoxGeometry(1.6, 0.8, 1.1),
+        new THREE.MeshLambertMaterial({ color: 0xdde6f2 }),
+      );
+      ac.position.set(jail.x + dx, roofY + 0.75, jail.z + jail.d / 2 - ring / 2);
+      this.scene.add(ac);
+    }
+
+    // ---- 鉄格子（壁の上に立ち上がる） ----
     const barMat = new THREE.MeshLambertMaterial({ color: 0x39414f });
-    const barGeo = new THREE.BoxGeometry(0.16, 3.4, 0.16);
+    const barGeo = new THREE.BoxGeometry(0.16, 1.5, 0.16);
     const bars = [];
     const addBars = (x0, z0, x1, z1, count) => {
       for (let i = 0; i <= count; i++) {
@@ -501,19 +616,75 @@ export class World {
     const inst = new THREE.InstancedMesh(barGeo, barMat, bars.length);
     const m = new THREE.Matrix4();
     bars.forEach((b, i) => {
-      m.makeTranslation(b.x, 3.9, b.z);
+      m.makeTranslation(b.x, 3.95, b.z);
       inst.setMatrixAt(i, m);
     });
     inst.instanceMatrix.needsUpdate = true;
     this.scene.add(inst);
 
-    const sign = new THREE.Sprite(makeLabel('POLICE', '#ffe9e9', 'rgba(28,74,160,0.95)', 68));
-    sign.scale.set(9, 4.5, 1);
-    sign.position.set(jail.x, 7.2, jail.z - 7.8);
-    this.scene.add(sign);
+    // ---- 入口（ゲート）と看板 ----
+    const door = MAP.jailDoor;
+    for (const side of [-1, 1]) {
+      const post = new THREE.Mesh(
+        new THREE.BoxGeometry(0.55, 4.2, 0.55),
+        new THREE.MeshLambertMaterial({ color: 0x2f6fd8 }),
+      );
+      post.position.set(jail.x + side * 3.1, 2.1, door.z);
+      const lamp = new THREE.Mesh(
+        new THREE.SphereGeometry(0.24, 10, 8),
+        new THREE.MeshBasicMaterial({ color: 0xfff2b8 }),
+      );
+      lamp.position.set(jail.x + side * 3.1, 4.4, door.z);
+      this.scene.add(post, lamp);
+    }
+    const hood = new THREE.Mesh(
+      new THREE.BoxGeometry(7.4, 0.5, 1.6),
+      new THREE.MeshLambertMaterial({ color: 0x27406f }),
+    );
+    hood.position.set(jail.x, 4.5, door.z);
+    this.scene.add(hood);
 
-    // 牢屋の中のベンチ（収容された泥棒の目印）
-    const benchMat = new THREE.MeshLambertMaterial({ color: 0x9a6b45 });
+    const sign = new THREE.Sprite(makeLabel('POLICE', '#ffffff', 'rgba(28,74,160,0.96)', 68));
+    sign.scale.set(9, 4.5, 1);
+    sign.position.set(jail.x, 6.6, door.z - 1.4);
+    this.scene.add(sign);
+    const jailSign = new THREE.Sprite(makeLabel('JAIL', '#1b3f8f', 'rgba(255,255,255,0.95)', 74));
+    jailSign.scale.set(4.6, 2.3, 1);
+    jailSign.position.set(jail.x, 3.0, jail.z - 7.9);
+    this.scene.add(jailSign);
+
+    // ---- 投光照明（四隅）で牢屋の中を明るく ----
+    const poleMat = new THREE.MeshLambertMaterial({ color: 0x8f9db3 });
+    for (const [dx, dz] of [
+      [-1, -1],
+      [1, -1],
+      [-1, 1],
+      [1, 1],
+    ]) {
+      const px = jail.x + dx * (jail.w / 2 + 1.4);
+      const pz = jail.z + dz * (jail.d / 2 + 1.4);
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, 5.4, 8), poleMat);
+      pole.position.set(px, 2.7, pz);
+      const head = new THREE.Mesh(
+        new THREE.BoxGeometry(0.9, 0.32, 0.6),
+        new THREE.MeshBasicMaterial({ color: 0xfff8dc }),
+      );
+      head.position.set(px - dx * 0.5, 5.45, pz - dz * 0.35);
+      const halo = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: glowTexture('rgba(255,250,225,0.85)', 'rgba(255,240,180,0)'),
+          transparent: true,
+          depthWrite: false,
+          opacity: 0.6,
+        }),
+      );
+      halo.scale.set(3.4, 3.4, 1);
+      halo.position.set(px - dx * 0.5, 5.45, pz - dz * 0.35);
+      this.scene.add(pole, head, halo);
+    }
+
+    // ---- 牢屋の中のベンチ（収容された泥棒の目印） ----
+    const benchMat = new THREE.MeshLambertMaterial({ color: 0xb98a5c });
     for (const s of [
       { x: -68, z: 58 },
       { x: -62, z: 58 },
@@ -523,7 +694,7 @@ export class World {
       { x: -56, z: 65 },
     ]) {
       const seat = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.18, 0.7), benchMat);
-      seat.position.set(s.x, 0.5, s.z);
+      seat.position.set(s.x, 0.55, s.z);
       this.scene.add(seat);
     }
   }
@@ -1003,9 +1174,21 @@ export class World {
     this.t += dt;
 
     // 俯瞰（マップ全体）ではフォグを切って街の色をそのまま見せる
+    const playerNow = game.player;
+    const jailView =
+      !!playerNow && (playerNow.state === 'jailed' || playerNow.state === 'detained');
+    if (jailView && !this._inJailView) {
+      // 牢屋に入った瞬間は牢屋の真上から見始める
+      this.centerJailView();
+      this.snapCamera();
+    }
+    this._inJailView = jailView;
     if (this.view === 'map') {
       this.scene.fog.near = 420;
       this.scene.fog.far = 900;
+    } else if (jailView) {
+      this.scene.fog.near = 120;
+      this.scene.fog.far = 320;
     } else {
       this.scene.fog.near = 95;
       this.scene.fog.far = 215;
@@ -1022,7 +1205,9 @@ export class World {
       const bob = a.moving
         ? Math.sin(this.t * 22 + a.id) * 0.05
         : Math.sin(this.t * 2.2 + a.id) * 0.012;
-      g.position.y = Math.abs(bob);
+      // 牢屋の中は床が少し高いので、収容中（拘束中）は足元を床の上に乗せる
+      const confined = a.state === 'jailed' || a.state === 'detained';
+      g.position.y = (confined ? 0.2 : 0) + Math.abs(bob);
       if (parts.legL) parts.legL.rotation.x = swing;
       if (parts.legR) parts.legR.rotation.x = -swing;
       if (parts.armL) parts.armL.rotation.x = -swing * 0.8;
@@ -1032,7 +1217,7 @@ export class World {
         parts.lampR.material.color.setHex(on ? COL.red : 0x5c1b18);
         parts.lampB.material.color.setHex(on ? 0x16264f : 0x4cc2ff);
       }
-      const jailed = a.state === 'jailed';
+      const jailed = confined;
       g.rotation.z = jailed ? 0.12 : 0;
       const carry = g.userData.carry;
       carry.visible = a.carrying != null;
@@ -1168,9 +1353,11 @@ export class World {
         this.playerRing.rotation.x = -Math.PI / 2;
         this.scene.add(this.playerRing);
       }
-      this.playerRing.position.set(player.x, 0.1, player.z);
+      const inJail = player.state === 'jailed' || player.state === 'detained';
+      this.playerRing.position.set(player.x, inJail ? 0.25 : 0.1, player.z);
       this.playerRing.scale.setScalar(1 + Math.sin(this.t * 4) * 0.05);
-      this.playerRing.visible = player.state === 'free';
+      this.playerRing.visible =
+        player.state === 'free' || player.state === 'jailed' || player.state === 'detained';
     }
 
     // ゲート演出
@@ -1183,12 +1370,42 @@ export class World {
     this.updateCamera(player, dt);
   }
 
+  /** 牢屋ビューのパン（スティック入力 −1..1 をフレームごとに渡す） */
+  panLookBy(dx, dz) {
+    const b = MAP.bounds;
+    const pad = 6;
+    const clampV = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+    this.lookPan.x = clampV(this.lookPan.x + dx, b.minX + pad, b.maxX - pad);
+    this.lookPan.z = clampV(this.lookPan.z + dz, b.minZ + pad, b.maxZ - pad);
+    return this.lookPan;
+  }
+
+  /** 牢屋ビューを牢屋の真上に戻す */
+  centerJailView() {
+    // 牢屋を画面の中央寄り（少し右）に置き、左側のHUDと重ならないようにする
+    this.lookPan = { x: MAP.jail.x - 10, z: MAP.jail.z - 4 };
+    this._inJailView = true; // 手動で合わせた位置を次のフレームで上書きしない
+    return this.lookPan;
+  }
+
   cameraPose(player) {
     // キャラ図鑑用の固定カメラ（スクリーンショット用 ?chars=1）
     if (this.view === 'chars') {
       const f = this.charFocus || { x: 0, z: 20 };
       const focus = new THREE.Vector3(f.x, 1.05, f.z);
       return { focus, desired: focus.clone().add(new THREE.Vector3(0, 1.45, 7.0)), follow: false, overview: false };
+    }
+    // 牢屋・拘束中は俯瞰カメラ：スティックで街を見渡せる（自キャラは牢屋に残す）
+    if (player && (player.state === 'jailed' || player.state === 'detained')) {
+      const focus = new THREE.Vector3(this.lookPan.x, 0, this.lookPan.z);
+      const offset = new THREE.Vector3(0, 46, 22);
+      return {
+        focus,
+        desired: focus.clone().add(offset),
+        follow: false,
+        overview: false,
+        jail: true,
+      };
     }
     const follow = this.view === 'follow';
     const overview = this.view === 'map';
@@ -1253,11 +1470,11 @@ export class World {
 
   updateCamera(player, dt) {
     if (player) {
-      const { focus, desired, follow } = this.cameraPose(player);
+      const { focus, desired, follow, jail } = this.cameraPose(player);
       this.camera.up.set(0, 1, 0);
-      const k = follow ? 5.0 : 3.0;
+      const k = jail ? 6.0 : follow ? 5.0 : 3.0;
       this.camera.position.lerp(desired, Math.min(1, dt * k));
-      this.camTarget.lerp(focus, Math.min(1, dt * 6));
+      this.camTarget.lerp(focus, Math.min(1, dt * (jail ? 7 : 6)));
       this.camera.lookAt(this.camTarget);
     }
   }

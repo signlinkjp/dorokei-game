@@ -1,4 +1,4 @@
-# DOROKEI — ドロケー × 人狼（Build 2：キャラ刷新・音・茂み5秒・捜索・UI整備・iOS）
+# DOROKEI — ドロケー × 人狼（Build 3：決定版アイコン・警察署の中の牢屋・15秒拘束→寝返り・HUD整理）
 
 警官と泥棒の鬼ごっこ（ドロケー）に、人狼の「スパイ」を混ぜた 3D アクション。
 HTML/CSS/JS + Three.js（CDN 不使用・`www/vendor/three.module.js` に同梱）だけで動き、
@@ -8,6 +8,33 @@ Capacitor の iOS シェル（`ios/`）でそのままアプリになります�
 - **150m × 150m** の広い街（銀行・宝石店・美術館・公園・駅・商店街・駐車場・路地・警察署）
 - 右上に **ミニマップ（レーダー）**、左下バーチャルスティック、右下の文脈アクションボタン
 - お宝は **10箇所の候補から5個** をランダム配置（捕まった時・奪い返された時は別の場所へ隠し戻し）
+
+## Build 3 で入ったもの（実機フィードバック＋採用した提案）
+
+1. **アプリアイコンを決定版に差し替え**：人狼警察（舌ペロでお宝）／黒マスクに警察バッジ＋無線＋手錠の
+   人狼泥棒の絵（`assets/dorokei-appicon-1024.png` → `ios/App/App/Assets.xcassets/AppIcon.appiconset/`）。
+   1024×1024・RGB・透過なしの PNG に整えて配置（`npm run appicon` で再生成）。
+2. **画面中央のHUDを撤去して視界をクリアに**：中央に浮いていた役割バナー・案内を左上の1列
+   （`hud-stack`）と左端（`note-rail`）へ移動。長押しゲージ・隠れゲージは右下のアクションボタンの上へ。
+   ミニマップ／タイマー／操作ボタンと重ならないよう、iPhone 縦・横の両方で調整。
+3. **自分の役＋やるべきことの常時表示**：左上の `role-card` に「役バッジ＋1行ミッション」を常時表示
+   （例：`👮 警察｜泥棒を確保しろ`、`🐺 人狼警察｜牢屋を解錠しろ`、`🕵️ 潜入捜査官（FBI）｜運ばれた宝を戻せ`）。
+   拘束中は `🔒 15秒拘束中｜あと◯秒後に泥棒へ転向`、寝返り直後は `🎭 泥棒｜お宝をゲートへ運べ` へ即切替。
+4. **警察署の中に牢屋**：警察署の建物（奥）＋白壁に青帯＋中央が吹き抜けの屋根で「署の中の牢屋」に。
+   牢屋の床は**タイルの明るい白**（`JAIL` の文字入り）＋投光照明＋ポイントライトで中の状況が一目で分かる。
+5. **牢屋・拘束中はスティックで俯瞰カメラ**：牢屋に入っている間（と後の15秒拘束中）は、左スティックで
+   カメラだけを動かして街の他のプレイヤーを観察できる。自キャラのマーカーは牢屋の位置に残る。
+6. **スパイの呼び名を整理**：片側だけスパイ（`cops`／`thieves`）の時はどちらも **「人狼（スパイ）」**、
+   双方（`both`）の時は警察側の敵＝**「人狼警察」**、泥棒側の警察スパイ＝**「潜入捜査官（FBI）」**
+   （14言語の土台に対応：`role.copSpy` / `role.thiefSpy` / `role.spyUnified`）。
+7. **スパイ発覚 → 牢屋で15秒拘束 → 相手陣営へ寝返り（1試合1回）**：現場を相手陣営に見られると即逮捕ではなく
+   警察署の牢屋へ移送し、15秒間停止＋俯瞰カメラ。15秒後に**見た目どおりの陣営の通常メンバーへ強制転向**
+   （人狼警察→警察、潜入捜査官→泥棒）。見た目・チーム・勝利判定・HUDも切り替わる。
+   わざとバレて寝返る利敵行為を防ぐため、**発覚した時だけ・1試合1回限り**。
+8. **プレイ中の MENU**：HUD上部の `☰` から「つづける／🏠 ホーム（タイトル）へ／サウンド／あそびかた／設定」。
+   ホームへは確認ダイアログ付き。メニュー中は試合が止まる。
+9. **Build 3 として配信**：`CURRENT_PROJECT_VERSION = 3`。ワークフローは `docs/ios-testflight-build3.yml`
+   （`BUILD_NUMBER: "3"`・preflight も `= 3;`）。
 
 ## Build 2 で入ったもの（トモアキさんの実機フィードバック反映）
 
@@ -35,7 +62,7 @@ Capacitor の iOS シェル（`ios/`）でそのままアプリになります�
 
 ```bash
 cd /workspace/work/dorokei-game
-PATH=/workspace/.tools/node22/bin:$PATH npm test        # ルール＋Build 2のユニットテスト（40本）
+PATH=/workspace/.tools/node22/bin:$PATH npm test        # ルール＋Build 2/3のユニットテスト（56本）
 PATH=/workspace/.tools/node22/bin:$PATH npm run serve   # http://127.0.0.1:8899/
 ```
 
@@ -98,7 +125,7 @@ PATH=/workspace/.tools/node22/bin:$PATH npm run serve   # http://127.0.0.1:8899/
 
 ## ステージ構成（次のビルドへの土台）
 
-`www/src/stages.js` がステージ台帳です。Build 2 では `City`（`available: true`）だけが遊べ、
+`www/src/stages.js` がステージ台帳です。Build 3 でも `City`（`available: true`）だけが遊べ、
 美術館・廃校・地下鉄・港は「Coming Soon」としてタイトルに並びます。追加するときは
 `STAGES` に1件足し、`available: true` と街データ（建物・ギミック）を用意します。
 `Game({ stage: '<id>' })` は遊べないIDを受け取ると例外にするので、未実装ステージが
@@ -141,19 +168,24 @@ www/
   src/main.js           UI配線・入力・設定の保存・モーダル・ゲームループ
 test/core.test.js       既存ルールのユニットテスト（26本）
 test/build2.test.js     Build 2のユニットテスト（14本：茂み5秒・捜索・ステージ・音・言語）
+test/build3.test.js     Build 3のユニットテスト（16本：呼び名・15秒拘束→寝返り・牢屋/HUD・アイコン・ワークフロー）
 tools/serve.mjs         依存なし静的サーバー
 tools/shot.mjs          ヘッドレスChromiumでスクリーンショット撮影（タイトル・街・キャラ・隠れ・捜索）
 tools/interaction-test.mjs  ブラウザ操作の自動確認（モーダル・設定・隠れ・捜索・言語・リザルト）
 tools/portrait.mjs      iPhone縦持ち(390×844)のレイアウト確認
-tools/make-icons.mjs    アプリアイコン(1024)とスプラッシュ(2732)の生成
+tools/make-icons.mjs    旧アイコン/スプラッシュの生成（Build 2まで）
+tools/set-app-icon.py   決定版アイコン（assets/dorokei-appicon-1024.png）をアセットカタログへ配置
 ios/                    Capacitor iOS プロジェクト（Xcode）
 docs/privacy.md         プライバシーポリシー本文
-docs/ios-testflight-build2.yml  Build 2 のワークフロー（Safariで .github/workflows/ へ上書きする用）
+docs/ios-testflight-build3.yml  Build 3 のワークフロー（Safariで .github/workflows/ へ上書きする用）
+docs/ios-testflight-build2.yml  Build 2 のワークフロー（履歴）
 ```
 
 ## テスト結果
 
-`npm test` → **40 / 40 pass**
+`npm test` → **56 / 56 pass**
+ブラウザ操作 `node tools/interaction-test.mjs` → **INTERACTION OK**（Build 3 の役カード・MENU・
+15秒拘束→寝返り・牢屋カメラ・縦横レイアウトも自動確認）
 
 Build 2 で追加した確認（`test/build2.test.js`）:
 
@@ -198,7 +230,7 @@ CPU 8人の通し対戦（6シードで両陣営の勝ちが発生）・再現�
 |---|---|
 | Bundle ID | `jp.signlink.Dorokei` |
 | アプリ名 | `DOROKEI` |
-| バージョン | `1.0.0`（**Build 2**） |
+| バージョン | `1.0.0`（**Build 3**） |
 | 対応 | iOS 15.0 以上 / iPhone・iPad / 縦横対応 / ステータスバー非表示 |
 | 暗号化 | `ITSAppUsesNonExemptEncryption = false`（輸出コンプライアンスの質問をスキップ） |
 
@@ -207,19 +239,19 @@ npx cap sync ios     # www → ios/App/App/public を更新（要 Node 22）
 npx cap open ios     # Xcode で開く（Macのみ）
 ```
 
-### TestFlight 配信（Build 2）
+### TestFlight 配信（Build 3）
 
-Build 番号は `2` に更新済みですが、ワークフロー本体の `BUILD_NUMBER` も `2` にする必要があります。
+Build 番号は `3` に更新済みですが、ワークフロー本体の `BUILD_NUMBER` も `3` にする必要があります。
 GitHub連携の権限ではワークフローファイルを更新できないため、Build 1 と同じく Safari で貼り付けます。
 
-1. Safari で `docs/ios-testflight-build2.yml` を開き、全文をコピー
+1. Safari で `docs/ios-testflight-build3.yml` を開き、全文をコピー
 2. GitHub の `signlinkjp/dorokei-game` → `.github/workflows/ios-testflight-build1.yml` → 鉛筆（Edit）
    → 全文を置き換えて Commit
 3. Actions →「**DOROKEI iOS TestFlight**」→ Run workflow
    - `confirm_bundle_id` = `jp.signlink.Dorokei`
    - `upload_to_testflight` = **true**
 
-貼り付けるまでは、既存ワークフローの preflight が「`CURRENT_PROJECT_VERSION = 2`」と「= 1」の
+貼り付けるまでは、既存ワークフローの preflight が「`CURRENT_PROJECT_VERSION = 3`」と「= 2」の
 不一致で止まるので、古いビルド番号が TestFlight に出ることはありません。
 Apple 側の準備（Bundle ID・App Store Connect のアプリ・GitHub Secrets）は Build 1 で完了済みです。
 
@@ -228,5 +260,5 @@ Apple 側の準備（Bundle ID・App Store Connect のアプリ・GitHub Secrets
 - コアは描画非依存なので、そのまま通信対戦（状態同期）やバランス調整の自動検証に回せます。
 - ステージは `stages.js` の台帳＋`Game({stage})` で切り替える設計。次は美術館（展示室・監視カメラ）や
   廃校（5秒で閉まる密室）、地下鉄（ワープ）など、ICE WOLF の展開に合わせたギミックを足していきます。
-- アイコンは3案から選んでもらい、選ばれたものを Build 3 で差し替える予定です。
+- アイコンは Build 3 で決定版（人狼警察×人狼泥棒×宝）に差し替え済みです。
 - 今後の候補：足音・視界などの情報戦、牢屋の格子越しの会話、スパイの告発（投票）、観戦カメラ。
