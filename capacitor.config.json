@@ -1,0 +1,10 @@
+{
+  "appId": "jp.signlink.Dorokei",
+  "appName": "DOROKEI",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#7FC4F0",
+    "scrollEnabled": false
+  }
+}

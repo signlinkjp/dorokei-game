@@ -1,0 +1,27 @@
+{
+  "name": "dorokei",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "DOROKEI — cops & robbers with hidden spies, in a wide pop-art city (3D, offline)",
+  "license": "UNLICENSED",
+  "scripts": {
+    "test": "node --test test/",
+    "serve": "node tools/serve.mjs",
+    "shot": "node tools/shot.mjs",
+    "interaction": "node tools/interaction-test.mjs",
+    "icons": "node tools/make-icons.mjs",
+    "ios:sync": "cap sync ios",
+    "ios:open": "cap open ios"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "@capacitor/core": "8.6.2",
+    "@capacitor/ios": "8.6.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.2"
+  }
+}

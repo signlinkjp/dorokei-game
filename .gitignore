@@ -1,0 +1,15 @@
+node_modules/
+.DS_Store
+build/
+*.log
+
+# Capacitor が生成するもの（cap sync で再生成）
+ios/App/App/public/
+ios/App/App/capacitor.config.json
+ios/App/App/config.xml
+ios/App/DerivedData/
+ios/App/output/
+ios/App/Pods/
+
+# ローカル確認用のブラウザ資材（重量物）
+.browser-libs/

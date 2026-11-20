@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<meta name="theme-color" content="#7fc4f0" />
+<title>DOROKEI — ドロケー × 人狼</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div id="app">
+  <canvas id="scene"></canvas>
+  <div id="vignette"></div>
+
+  <!-- ===== ゲームHUD ===== -->
+  <div id="hud" class="hidden">
+    <div class="hud-top">
+      <div class="hud-row">
+        <div class="hud-card timer">
+          <b id="timerValue">5:00</b><small>のこり</small>
+        </div>
+        <button id="viewBtn" class="hud-btn" type="button">俯瞰</button>
+      </div>
+      <div class="hud-row counts">
+        <div class="hud-card cop"><b id="copCount">3</b><small>警察</small></div>
+        <div class="hud-card thief"><b id="thiefCount">5</b><small>泥棒</small></div>
+        <div class="hud-card jail"><b id="jailCount">0</b><small>牢屋</small></div>
+        <div class="hud-card loot"><b id="lootCount">0/5</b><small>お宝</small></div>
+      </div>
+    </div>
+
+    <div class="radar">
+      <canvas id="minimap"></canvas>
+      <div class="radar-label">RADAR</div>
+    </div>
+
+    <div id="roleBanner" class="role-banner">
+      <span id="roleTag" class="role-tag">警察</span>
+      <span id="roleText" class="role-text">泥棒を捕まえろ！</span>
+    </div>
+
+    <div id="eventFeed" class="event-feed"></div>
+
+    <div id="gauge" class="gauge hidden">
+      <span id="gaugeLabel">解錠中…</span>
+      <div class="gauge-bar"><i id="gaugeFill"></i></div>
+    </div>
+
+    <div id="noteStack" class="note-stack">
+      <div id="spyNote" class="note spy hidden"></div>
+      <div id="hiddenNote" class="note hidden-note hidden">物陰に隠れている（動くと出る）</div>
+    </div>
+
+    <div class="controls">
+      <div id="stick" class="stick">
+        <div id="stickKnob" class="knob"></div>
+      </div>
+      <button id="actionBtn" class="action-btn" type="button">つかまえる</button>
+    </div>
+
+    <div class="hint">ドラッグで移動 ／ 右下ボタンでアクション ／ 長押しで解錠・救出・もどす</div>
+  </div>
+
+  <!-- ===== タイトル ===== -->
+  <div id="title" class="screen title-screen">
+    <div class="title-inner">
+      <div class="siren" aria-hidden="true"><i class="r"></i><i class="b"></i></div>
+      <h1 class="logo"><span class="logo-out">DOROKEI</span><span class="logo-in">DOROKEI</span></h1>
+      <div class="logo-sub">ドロケー × 人狼</div>
+      <p class="catch">
+        警官から逃げて、お宝を5つ盗み出せ。<br />
+        でも ── 仲間の中に、スパイがいる。
+      </p>
+
+      <div class="setup">
+        <div class="setup-row">
+          <span class="setup-label">あなたの役</span>
+          <div class="seg" id="rolePick">
+            <button class="seg-btn active" data-role="auto" type="button">おまかせ</button>
+            <button class="seg-btn" data-role="cop" type="button">警察</button>
+            <button class="seg-btn" data-role="thief" type="button">泥棒</button>
+          </div>
+        </div>
+        <div class="setup-row">
+          <span class="setup-label">スパイ設定</span>
+          <div class="seg small" id="spyPick">
+            <button class="seg-btn active" data-spy="both" type="button">両方</button>
+            <button class="seg-btn" data-spy="cops" type="button">警察のみ</button>
+            <button class="seg-btn" data-spy="thieves" type="button">泥棒のみ</button>
+            <button class="seg-btn" data-spy="none" type="button">なし</button>
+          </div>
+        </div>
+        <div class="setup-row">
+          <span class="setup-label">自分がスパイ</span>
+          <div class="seg small" id="selfSpyPick">
+            <button class="seg-btn active" data-self="random" type="button">ランダム</button>
+            <button class="seg-btn" data-self="always" type="button">必ず</button>
+            <button class="seg-btn" data-self="never" type="button">なし</button>
+          </div>
+        </div>
+      </div>
+
+      <button id="startBtn" class="start-btn" type="button">ゲームスタート</button>
+
+      <div class="rules">
+        <div class="rule"><b class="c-cop">警察</b>泥棒を全員確保、または時間切れでお宝を1つでも守れば勝ち。</div>
+        <div class="rule"><b class="c-thief">泥棒</b>お宝5つを全部ゲートへ運べば勝ち。運搬中は足が遅くなる。</div>
+        <div class="rule"><b class="c-hide">隠れる</b>茂みの中でアクション → 半透明になって見つかりにくい（お宝持ちは不可）。</div>
+        <div class="rule"><b class="c-spy">スパイ</b>内通者は牢屋を解錠、密告者は運ばれたお宝を奪い返す。見られると正体発覚。</div>
+        <div class="rule muted">150m×150mの広い街（銀行・宝石店・美術館・公園・駅・商店街）。右上のレーダーで迷いません。CPU 8人＋あなた。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== リザルト ===== -->
+  <div id="result" class="screen result-screen hidden">
+    <div class="result-card">
+      <div id="resultKicker" class="result-kicker">TIME UP</div>
+      <h2 id="resultTitle" class="result-title">警察陣営の勝利</h2>
+      <p id="resultReason" class="result-reason">お宝を守りきった</p>
+      <div id="resultStats" class="result-stats"></div>
+      <div class="result-actions">
+        <button id="againBtn" class="start-btn" type="button">もう一回</button>
+        <button id="homeBtn" class="ghost-btn" type="button">タイトルへ</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
