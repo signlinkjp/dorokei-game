@@ -107,8 +107,12 @@ docs/ios-testflight-build1.yml  TestFlight ワークフローの下書き（Safa
 
 ## スクリーンショット
 
-- `downloads/dorokei-title.png` … タイトル画面（パトカーの赤×青＋お宝のゴールド、明るいポップな新デザイン）
-- `downloads/dorokei-play.png` … プレイ画面（150m×150mの街全体・HUD・右上のレーダー）
+![タイトル](docs/screenshots/dorokei-title.png)
+![プレイ画面](docs/screenshots/dorokei-play.png)
+
+- `docs/screenshots/dorokei-title.png` … タイトル画面（パトカーの赤×青＋お宝のゴールド、明るいポップな新デザイン）
+- `docs/screenshots/dorokei-play.png` … プレイ画面（150m×150mの街全体・HUD・右上のレーダー）
+- アプリアイコン：`assets/appicon-1024.png`
 
 再撮影：`node tools/shot.mjs`。縦持ちは `node tools/portrait.mjs`。
 ヘッドレス Chromium は `/workspace/work/dcd-b17/browsers` を使い、システムに無い libatk/libatspi は
