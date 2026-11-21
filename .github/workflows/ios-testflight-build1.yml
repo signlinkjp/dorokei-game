@@ -1,27 +1,28 @@
-# DOROKEI iOS TestFlight Build 4
+# DOROKEI iOS TestFlight Build 5
 # ============================================================
-# Build 4 用ワークフロー（トモアキさんが Safari で貼り付ける用）
+# Build 5 用ワークフロー（トモアキさんが Safari で貼り付ける用）
 #
 # GitHub連携の権限ではワークフローファイルを直接更新できないため、
 # このファイルの中身をそのままコピーして
 #   .github/workflows/ios-testflight-build1.yml
 # を上書きしてください（Build 1・2 と同じ手順）。
 # 貼り付けるまで、既存ワークフローの preflight は
-# 「CURRENT_PROJECT_VERSION = 4」と古いビルド番号の不一致で止まるので、
+# 「CURRENT_PROJECT_VERSION = 5」と古いビルド番号の不一致で止まるので、
 # 古いビルド番号が TestFlight に出ることはありません。
 #
 # ※ 1行目は必ず「# 」で始まる YAML コメントのままにしてください。
 # ============================================================
-# DOROKEI — iOS TestFlight ビルド＆配信（Build 4）
+# DOROKEI — iOS TestFlight ビルド＆配信（Build 5）
 #
 # 使い方（トモアキさん向け）:
 #   Actions →「DOROKEI iOS TestFlight」→ Run workflow
 #     - confirm_bundle_id に `jp.signlink.Dorokei`
 #     - upload_to_testflight は true（TestFlight へ配信）
-#   ※ ビルド番号は下の BUILD_NUMBER で管理します（Build 4 = 4）。
-#   ※ Build 4 は参加人数の選択（4〜10人）・人数に応じたお宝数・タッチ救出と救出優先順位・
-#     救出直後の2.5秒無敵＋加速・スパイ接近アラート・ビルのオクルージョン透過・
-#     POLICEロゴと識別タグ・牢屋/ゲートの視認性・iOSのコピー抑止を含みます。
+#   ※ ビルド番号は下の BUILD_NUMBER で管理します（Build 5 = 5）。
+#   ※ Build 5 は「2回目プレイ・バックグラウンド復帰後に音が無音のまま戻らないバグ」の修正・
+#     頭上の識別タグ（YOU / A〜J）の拡大と縁取り・人狼警察の解錠で救出された泥棒が
+#     その場で震えて固まるバグの修正・救出された側の「5秒間は次の仲間を助けられない」ルール・
+#     スパイ発覚後の拘束 15秒→10秒・お宝を戻すクールタイム 36秒→5秒を含みます。
 #
 # 必要な Secrets（Repository secrets / 既存リポジトリと同じ値）:
 #   APPLE_TEAM_ID                   … 例 TGBNH8WJV6
@@ -55,7 +56,7 @@ concurrency:
 env:
   BUNDLE_ID: jp.signlink.Dorokei
   MARKETING_VERSION: "1.0.0"
-  BUILD_NUMBER: "4"
+  BUILD_NUMBER: "5"
 
 jobs:
   preflight:
@@ -104,8 +105,13 @@ jobs:
           grep -q 'id="hideGauge"' www/index.html
           grep -q 'id="stageGrid"' www/index.html
           grep -q 'data-panel="privacy"' www/index.html
-          # Build 3: 15秒拘束→寝返り／役とミッションの常時表示／MENU／警察署の中の牢屋
-          grep -q 'detainTime: 15' www/src/core.js
+          # Build 3/5: 10秒拘束→寝返り／役とミッションの常時表示／MENU／警察署の中の牢屋
+          grep -q 'detainTime: 10' www/src/core.js
+          grep -q 'rescueTouchCd: 5' www/src/core.js
+          grep -q 'hideKeepRange: 7.0' www/src/core.js
+          grep -q 'tagTexFor' www/src/render.js
+          grep -q 'audio.tick(now)' www/src/main.js
+          grep -q 'visibilitychange' www/src/main.js
           # Build 4: 参加人数（4〜10人）・人数に応じたお宝数・タッチ救出・救出後の無敵＋加速・
           #          スパイ接近アラート・コピー抑止
           grep -q 'export function splitTeams' www/src/core.js
@@ -115,7 +121,7 @@ jobs:
           grep -q 'rescueImmunity: 2.5' www/src/core.js
           grep -q 'spyAlertRange: 14' www/src/core.js
           grep -q 'pickJailTarget' www/src/core.js
-          grep -q 'returnCooldown: 36' www/src/core.js
+          grep -q 'returnCooldown: 5' www/src/core.js
           grep -q 'target.role !== ROLE.THIEF_SPY' www/src/core.js
           grep -q 'rescueImmune\|rescueImmunity' www/src/core.js
           ! grep -q '密告' www/src/i18n.js
@@ -130,6 +136,7 @@ jobs:
           grep -q 'id="sizePick"' www/index.html
           grep -q 'id="spyAlert"' www/index.html
           test -f test/build4.test.js
+          test -f test/build5.test.js
           grep -q 'spyNameKey' www/src/core.js
           grep -q 'role.spyUnified' www/src/i18n.js
           grep -q 'id="roleCard"' www/index.html
@@ -157,7 +164,7 @@ jobs:
           pbx = pathlib.Path('ios/App/App.xcodeproj/project.pbxproj').read_text()
           assert 'PRODUCT_BUNDLE_IDENTIFIER = jp.signlink.Dorokei;' in pbx
           assert 'MARKETING_VERSION = 1.0.0;' in pbx
-          assert 'CURRENT_PROJECT_VERSION = 4;' in pbx
+          assert 'CURRENT_PROJECT_VERSION = 5;' in pbx
           print('iOS project contract OK')
           PY
 
@@ -323,7 +330,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dorokei-testflight-build4-evidence
+          name: dorokei-testflight-build5-evidence
           path: |
             build/release/*.log
             build/release/*.json
