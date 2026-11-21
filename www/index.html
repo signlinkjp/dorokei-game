@@ -89,6 +89,7 @@
       </div>
       <div class="pause-tools">
         <button id="pauseSound" class="tool-btn" type="button">🔊 <span data-i18n="menu.sound">サウンド</span></button>
+        <button id="pauseHint" class="tool-btn" type="button">💡 <span data-i18n="menu.spyHint">役ヒント</span></button>
         <button id="pauseHowto" class="tool-btn" type="button">❓ <span data-i18n="btn.howto">あそびかた</span></button>
         <button id="pauseSettings" class="tool-btn" type="button">⚙️ <span data-i18n="btn.settings">設定</span></button>
       </div>
@@ -176,7 +177,7 @@
 
       <div class="title-links">
         <button id="privacyBtn" class="link-btn" type="button" data-i18n="btn.privacy">プライバシーポリシー</button>
-        <span class="version">1.0.0 · Build 5</span>
+        <span class="version">1.0.0 · Build 6</span>
       </div>
     </div>
   </div>
@@ -228,6 +229,13 @@
           <div class="seg" id="soundPick">
             <button class="seg-btn" data-sound="on" type="button" data-i18n="settings.soundOn">ON</button>
             <button class="seg-btn" data-sound="off" type="button" data-i18n="settings.soundOff">OFF</button>
+          </div>
+        </div>
+        <div class="set-row">
+          <span class="set-label" data-i18n="settings.hint">役ヒント表示</span>
+          <div class="seg" id="hintPick">
+            <button class="seg-btn active" data-hint="on" type="button" data-i18n="settings.soundOn">ON</button>
+            <button class="seg-btn" data-hint="off" type="button" data-i18n="settings.soundOff">OFF</button>
           </div>
         </div>
         <div class="set-row">

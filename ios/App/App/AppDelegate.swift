@@ -1,5 +1,6 @@
 import UIKit
 import Capacitor
+import AVFoundation
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -26,7 +27,21 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
-        // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+        // Build 6: ホーム画面や他アプリとの往復のあとに WKWebView の音（Web Audio）が
+        // 出なくなることがあるため、前面に戻るたびに音声セッションを取り直す。
+        AppDelegate.activateAudioSession()
+    }
+
+    /// カテゴリは Capacitor 標準と同じ .ambient（マナーモードを尊重し、他アプリの音も止めない）。
+    /// セッションが非アクティブのまま戻ると Web Audio が無音になるので、必ず setActive(true) する。
+    static func activateAudioSession() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true)
+        } catch {
+            // 通話中などで音声セッションが取れない時も、ゲーム自体は続けられる
+        }
     }
 
     func applicationWillTerminate(_ application: UIApplication) {

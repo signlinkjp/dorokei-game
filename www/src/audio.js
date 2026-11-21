@@ -89,6 +89,11 @@ export class AudioEngine {
     this._lastRevive = 0;
     this._lastRebuild = 0;
     this._stuckSince = 0;
+    // ---- Build 6: iOS WKWebView の「時計が止まったまま」検知用 ----
+    // state が 'running' のまま ctx.currentTime だけが進まなくなり、
+    // resume() では戻らない（ホーム往復・画面収録・着信のあとになる）。
+    this._ct = 0; // 前回見た currentTime
+    this._ctAt = 0; // その時点の実時刻（performance.now）
   }
 
   _now() {
@@ -153,6 +158,8 @@ export class AudioEngine {
     this.sfxBus = null;
     this.musicBus = null;
     this.noiseBuf = null;
+    this._ct = 0;
+    this._ctAt = 0;
   }
 
   /** 止まっている AudioContext に resume() を投げる（Promise の失敗は無視） */
@@ -165,6 +172,72 @@ export class AudioEngine {
       /* resume できない環境はそのまま */
     }
     return ctx.state === 'running';
+  }
+
+  /**
+   * Build 6: 時計が止まっていないか。
+   * ctx.state が 'running' でも ctx.currentTime が進まないと、
+   * 鳴らした音はすべて同じ時刻に予約されたまま永久に鳴らない（無音）。
+   */
+  clockStalled(now = this._now()) {
+    const ctx = this.ctx;
+    if (!ctx || ctx.state !== 'running') return false;
+    const ct = ctx.currentTime;
+    if (!this._ctAt) {
+      this._ct = ct;
+      this._ctAt = now;
+      return false;
+    }
+    if (ct > this._ct + 0.02 || ct < this._ct - 0.05) {
+      // 進んでいる（または巻き戻って作り直された）ので時計を合わせ直す
+      this._ct = ct;
+      this._ctAt = now;
+      return false;
+    }
+    return now - this._ctAt > 600;
+  }
+
+  /** Build 6: 時計が止まった AudioContext を捨てて作り直す（連発しないよう間隔をあける） */
+  _hardReset(now = this._now()) {
+    if (now - this._lastRebuild < 1200) return false;
+    this._lastRebuild = now;
+    const name = this._deferredSfx;
+    const at = this._deferredAt;
+    this._rebuild();
+    this._ct = this.ctx ? this.ctx.currentTime : 0;
+    this._ctAt = now;
+    this._reviveTries = 0;
+    this._stuckSince = 0;
+    // 直前の操作音を、作り直したコンテキストで1回だけ鳴らし直す
+    if (name && this._now() - (at || 0) <= 2500) {
+      this._deferredSfx = name;
+      this._deferredAt = at;
+      this._flushDeferredSfx();
+    }
+    return true;
+  }
+
+  /**
+   * Build 6: バックグラウンド（ホーム画面・他アプリ）から戻った時の復帰。
+   * ここで時計を測り直し、止まっていれば AudioContext ごと作り直す。
+   */
+  resumeFromBackground(now = this._now()) {
+    if (!this.available) return false;
+    if (typeof document !== 'undefined' && document.hidden) return false;
+    const ctx = this.ensureCtx();
+    if (!ctx) return false;
+    const wasStalled = this.clockStalled(now);
+    this._ctAt = 0; // 戻った瞬間から時計を測り直す
+    if (ctx.state !== 'running') {
+      this._resumeCtx(ctx);
+    }
+    if (wasStalled || ctx.state !== 'running') {
+      // resume() では戻らないことがあるので、確実に作り直す
+      if (!this._hardReset(now)) this._reviveTries = 0;
+    }
+    this._flushDeferredSfx();
+    if (this._musicWanted && this.enabled) this._startScheduler();
+    return this.running();
   }
 
   /** Build 5: AudioContext ごと作り直し、BGM の予約も引き継ぐ */
@@ -219,6 +292,11 @@ export class AudioEngine {
     const ctx = this.ensureCtx();
     if (!ctx) return;
     if (ctx.state === 'running') {
+      // Build 6: running なのに時計が止まっている（WKWebView 特有）なら作り直す
+      if ((this.enabled || this._musicWanted) && this.clockStalled(now)) {
+        this._hardReset(now);
+        return;
+      }
       this._reviveTries = 0;
       this._stuckSince = 0;
       this._flushDeferredSfx();
@@ -236,6 +314,8 @@ export class AudioEngine {
       this._lastRebuild = now;
       this._reviveTries = 0;
       this._rebuild();
+      this._ct = this.ctx ? this.ctx.currentTime : 0;
+      this._ctAt = now;
     }
   }
 

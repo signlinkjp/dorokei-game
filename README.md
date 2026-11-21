@@ -1,4 +1,4 @@
-# DOROKEI — ドロケー × 人狼（Build 5：無音バグ修正・タグ拡大・救出後バグ修正・拘束10秒・戻し5秒）
+# DOROKEI — ドロケー × 人狼（Build 6：ホーム往復の音切れ対策・確保判定の手触り・役ヒントON/OFF・スパイだけ残った時の決着）
 
 警官と泥棒の鬼ごっこ（ドロケー）に、人狼の「スパイ」を混ぜた 3D アクション。
 HTML/CSS/JS + Three.js（CDN 不使用・`www/vendor/three.module.js` に同梱）だけで動き、
@@ -8,6 +8,37 @@ Capacitor の iOS シェル（`ios/`）でそのままアプリになります�
 - **150m × 150m** の広い街（銀行・宝石店・美術館・公園・駅・商店街・駐車場・路地・警察署）
 - 右上に **ミニマップ（レーダー）**、左下バーチャルスティック、右下の文脈アクションボタン
 - お宝は **10箇所の候補から人数に応じて3〜5個** をランダム配置（捕まった時・戻された時は別の場所へ隠し戻し）
+
+## Build 6 で入ったもの（Build 5 実機フィードバック：動画2本＋スクショ1枚＋4項目）
+
+1. **iPhone ホーム画面との往復で音が出なくなる問題の徹底対策**（`audio.js` / `main.js` / `AppDelegate.swift`）：
+   iOS の WKWebView では `AudioContext.state` が `'running'` のまま **`currentTime` だけが止まる**
+   症状があり、この時 `resume()` も効かず、鳴らした音はすべて同じ時刻に予約されたまま永久に鳴らない。
+   **時計の停滞（600ms 進まない）を検知して `AudioContext` ごと作り直す** `clockStalled()` /
+   `_hardReset()` を追加し、`visibilitychange` / `pageshow` / `focus` で戻った瞬間に
+   `resumeFromBackground()`（測り直し→必要なら作り直し）を呼ぶ。ネイティブ側も
+   `applicationDidBecomeActive` で `AVAudioSession`（`.ambient` + `mixWithOthers`）を必ず取り直す。
+   実機の画面収録を解析すると、Build 5 はホーム往復の瞬間（00:41:09 の動画では 0:53）から
+   残り95秒が完全無音だった。今回の修正はその状態を毎回引き戻す。
+2. **泥棒に触れているのに確保できないバグの修正**（`core.js`）：
+   ① 確保距離 **1.9 → 2.35m**（体の半径0.62＋0.62＝1.24m より必ず外側）。
+   ② 確保判定を「各キャラの移動直後」から **`separateAgents()`（押し合い）の後の再判定**へ移し、
+      触れているフレームを取りこぼさない（`resolveArrests()`）。
+   ③ 確保クールタイム **5.5 → 2.0秒**。1人捕まえたあと5.5秒も次の泥棒を捕まえられず、
+      追いついてもすり抜けるように見えていた。
+3. **スティック上の紫の説明バナー（役ヒント）の ON/OFF**（`main.js` / `index.html` / `i18n.js`）：
+   タイトルの設定に「役ヒント表示」、プレイ中の `☰` メニューに「💡 役ヒント」を追加。
+   `localStorage` の `dorokei.settings.v1.spyHint`（初期値 ON）に保存し、OFF にすると紫バナーを
+   出さない（役カードの役名・ミッションはそのまま残る）。
+4. **勝利条件の穴の修正（FBI だけ残って詰む問題）**（`core.js`）：
+   「泥棒陣営が全員牢屋」だけを見ていたため、逮捕できないスパイが自由に残ると決着せず、
+   動画（00:51:25）のように **5人牢屋・残り1人が自由なまま時間切れまで** 続いていた。
+   **確保できる泥棒（`freeCatchableThieves()`）が0人になった時点で警察の勝利**とし、
+   残りが正体を隠したスパイだけなら「泥棒を全員確保した（残りは確保できないスパイだけ）」と表示する。
+   Build 3 の「発覚して拘束中のスパイがいる間は勝敗を決めない」は維持（拘束明けに寝返る）。逆陣営
+   （泥棒の勝ち＝お宝を全部搬出）も点検し、テストを追加した。
+5. **Build 6 として配信**：`CURRENT_PROJECT_VERSION = 6`（2箇所）、`www/index.html` の表記、
+   `docs/ios-testflight-build6.yml`。
 
 ## Build 5 で入ったもの（22:59 の実機フィードバック＋6項目）
 
@@ -156,14 +187,14 @@ PATH=/workspace/.tools/node22/bin:$PATH npm run serve   # http://127.0.0.1:8899/
 
 | 役 | 見た目 | 本当の陣営 | できること |
 |---|---|---|---|
-| 警察 COP | 紺のポリス服・制帽・赤青ランプ | 警察 | 泥棒に触れると確保（クールダウン4秒）。牢屋へ収容。茂みの近くで **🔍 捜索**。ボタン長押しでダッシュ |
+| 警察 COP | 紺のポリス服・制帽・赤青ランプ | 警察 | 泥棒に触れると確保（**2.35m**・クールダウン**2秒**）。牢屋へ収容。茂みの近くで **🔍 捜索**。ボタン長押しでダッシュ |
 | 人狼警察 COP SPY | 警官のフリ | **泥棒** | 牢屋の前で1.5秒長押し＝解錠して脱獄させる。警官に7.5m以内で見られると **10秒拘束→警察へ寝返り** |
 | 泥棒 THIEF | ボーダー・目出し・赤ニット帽 | 泥棒 | お宝を回収→脱出ゲートへ。牢屋の前で1.5秒長押し＝仲間を救出。茂みに**最大5秒**隠れる |
 | 潜入捜査官 THIEF SPY | 泥棒のフリ | **警察** | ゲート前で1.5秒長押し＝運ばれたお宝を戻す（**1個ごとに5秒**）。泥棒に見られると **10秒拘束→泥棒へ寝返り** |
 
 **勝利条件**
 
-- **警察陣営**：泥棒を全員牢屋に入れる／時間切れ（既定300秒、設定で3分・5分・7分）でお宝を**1つでも守りきる**
+- **警察陣営**：泥棒を全員牢屋に入れる（残りが正体を隠したスパイだけになっても勝ち）／時間切れ（既定300秒、設定で3分・5分・7分）でお宝を**1つでも守りきる**
 - **泥棒陣営**：お宝**5個すべて**を脱出ゲートへ運ぶ
 
 **細部**
@@ -213,6 +244,10 @@ PATH=/workspace/.tools/node22/bin:$PATH npm run serve   # http://127.0.0.1:8899/
   `suspended` / `interrupted` / `closed` になっても、フレームごとの見張りと操作・画面復帰の
   イベントで `resume()` し、戻らない時は作り直します。鳴らせない間に押された効果音は、
   復帰した直後に1回だけ鳴らします（古い操作音は2.5秒で捨てる）。
+- **Build 6: 時計の停滞検知**（`clockStalled()` / `_hardReset()` / `resumeFromBackground()`）：
+  `state` が `running` のまま `currentTime` が止まる WKWebView 特有の無音を検知し、
+  `AudioContext` ごと作り直します（連発しないよう1.2秒の間隔）。ネイティブ側は
+  `AppDelegate.applicationDidBecomeActive` で `AVAudioSession` を再取得します。
 
 ## 言語
 
@@ -242,6 +277,7 @@ www/
   src/main.js           UI配線・入力・設定の保存・モーダル・ゲームループ
 test/core.test.js       既存ルールのユニットテスト（26本）
 test/build2.test.js     Build 2のユニットテスト（14本：茂み5秒・捜索・ステージ・音・言語）
+test/build6.test.js     Build 6のユニットテスト（音の時計停止・確保距離と再判定・2秒クールタイム・役ヒント・勝利条件の穴・ワークフロー）
 test/build5.test.js     Build 5のユニットテスト（音の復帰・タグ拡大・救出後の振動バグ・5秒ルール・10秒拘束・ワークフロー）
 test/build4.test.js     Build 4のユニットテスト（人数・お宝数・移動・救出・アラート・スパイルール・文言・ワークフロー）
 test/build3.test.js     Build 3のユニットテスト（呼び名・拘束→寝返り・牢屋/HUD・アイコン・ワークフロー）
@@ -253,16 +289,18 @@ tools/make-icons.mjs    旧アイコン/スプラッシュの生成（Build 2ま
 tools/set-app-icon.py   決定版アイコン（assets/dorokei-appicon-1024.png）をアセットカタログへ配置
 ios/                    Capacitor iOS プロジェクト（Xcode）
 docs/privacy.md         プライバシーポリシー本文
-docs/ios-testflight-build5.yml  Build 5 のワークフロー（Safariで .github/workflows/ へ上書きする用）
+docs/ios-testflight-build6.yml  Build 6 のワークフロー（Safariで .github/workflows/ へ上書きする用）
+docs/ios-testflight-build5.yml  Build 5 のワークフロー（履歴）
 docs/ios-testflight-build4.yml  Build 4 のワークフロー（履歴）
 docs/ios-testflight-build2.yml  Build 2 のワークフロー（履歴）
 ```
 
 ## テスト結果
 
-`npm test` → **103 / 103 pass**
+`npm test` → **125 / 125 pass**
 ブラウザ操作 `node tools/interaction-test.mjs` → **INTERACTION OK**（役カード・MENU・10秒拘束→寝返り・
-牢屋カメラ・縦横レイアウト・Build 5 の音復帰／タグ拡大／救出後5秒／戻し5秒も自動確認）
+牢屋カメラ・縦横レイアウト・Build 5 の音復帰／タグ拡大／救出後5秒／戻し5秒・Build 6 の役ヒント ON/OFF／
+2.0m での確保／スパイだけ残った時の決着／時計停止からの作り直しも自動確認）
 
 Build 2 で追加した確認（`test/build2.test.js`）:
 
@@ -307,7 +345,7 @@ CPU 8人の通し対戦（6シードで両陣営の勝ちが発生）・再現�
 |---|---|
 | Bundle ID | `jp.signlink.Dorokei` |
 | アプリ名 | `DOROKEI` |
-| バージョン | `1.0.0`（**Build 5**） |
+| バージョン | `1.0.0`（**Build 6**） |
 | 対応 | iOS 15.0 以上 / iPhone・iPad / 縦横対応 / ステータスバー非表示 |
 | 暗号化 | `ITSAppUsesNonExemptEncryption = false`（輸出コンプライアンスの質問をスキップ） |
 
@@ -316,19 +354,19 @@ npx cap sync ios     # www → ios/App/App/public を更新（要 Node 22）
 npx cap open ios     # Xcode で開く（Macのみ）
 ```
 
-### TestFlight 配信（Build 5）
+### TestFlight 配信（Build 6）
 
-Build 番号は `5` に更新済みですが、ワークフロー本体の `BUILD_NUMBER` も `5` にする必要があります。
+Build 番号は `6` に更新済みですが、ワークフロー本体の `BUILD_NUMBER` も `6` にする必要があります。
 GitHub連携の権限ではワークフローファイルを更新できないため、Build 1 と同じく Safari で貼り付けます。
 
-1. Safari で `docs/ios-testflight-build5.yml` を開き、全文をコピー
+1. Safari で `docs/ios-testflight-build6.yml` を開き、全文をコピー
 2. GitHub の `signlinkjp/dorokei-game` → `.github/workflows/ios-testflight-build1.yml` → 鉛筆（Edit）
    → 全文を置き換えて Commit
 3. Actions →「**DOROKEI iOS TestFlight**」→ Run workflow
    - `confirm_bundle_id` = `jp.signlink.Dorokei`
    - `upload_to_testflight` = **true**
 
-貼り付けるまでは、既存ワークフローの preflight が「`CURRENT_PROJECT_VERSION = 5`」と古い番号の
+貼り付けるまでは、既存ワークフローの preflight が「`CURRENT_PROJECT_VERSION = 6`」と古い番号の
 不一致で止まるので、古いビルド番号が TestFlight に出ることはありません。
 Apple 側の準備（Bundle ID・App Store Connect のアプリ・GitHub Secrets）は Build 1 で完了済みです。
 

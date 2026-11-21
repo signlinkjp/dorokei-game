@@ -80,8 +80,13 @@ export const CFG = Object.freeze({
   speed: { cop: 6.3, thief: 6.9, carry: 6.2 }, // 運搬中は遅くなる（Build 4 で再調整）
   copDash: 1.16, // Build 4: 追跡が強すぎて運搬が全部つかまっていたので緩めた
   radius: 0.62,
-  arrestRange: 1.9,
-  arrestCooldown: 5.5,
+  // Build 6: 「触れているのに捕まらない」の修正。
+  // 見た目の体が重なる距離（半径0.62＋0.62＝1.24m）より、判定は必ず外側に置く。
+  // 1.9 → 2.35m に広げ、押し合い（separateAgents）の後に必ずもう一度判定する。
+  arrestRange: 2.35,
+  // Build 6: 1人確保したあと 5.5秒も次の泥棒を捕まえられず、追いついても
+  // すり抜けるように見えていた。2秒に短縮（連続で牢屋送りにできる）。
+  arrestCooldown: 2.0,
   pickupRange: 2.0,
   actionRange: 2.9,
   actionTime: 1.5,
@@ -946,6 +951,23 @@ export class Game {
     return 0;
   }
 
+  /**
+   * Build 6: 全員が動いて押し合った後の確保判定。
+   * 以前は各キャラの移動直後（押し合いの前）にだけ判定していたので、
+   * 警官が泥棒に触れていても separateAgents で押し離されたフレームは
+   * 確保が漏れていた。ここで1フレーム1回だけまとめて判定する。
+   */
+  resolveArrests() {
+    if (this.phase !== 'playing') return 0;
+    let caught = 0;
+    for (const a of this.agents) {
+      if (a.state !== 'free' || a.arrestCd > 0) continue;
+      const tgt = this.nearest(a, (o) => this.canArrest(a, o), this.cfg.arrestRange);
+      if (tgt.agent && this.arrest(a, tgt.agent)) caught++;
+    }
+    return caught;
+  }
+
   arrest(cop, thief) {
     if (!this.canArrest(cop, thief)) return false;
     if (cop.arrestCd > 0) return false;
@@ -1355,6 +1377,9 @@ export class Game {
     for (const a of this.agents) this.tickAgent(a, dt);
     // Build 4: キャラ同士が同じ位置に重なって「1人に見える」のを防ぐ
     this.separateAgents();
+    // Build 6: 押し合いのあとにもう一度だけ確保判定をする。
+    // （移動→押し合いの途中で距離が広がり、触れているのに捕まらないフレームがあった）
+    this.resolveArrests();
     this.updatePings(dt);
     this.updateEffects(dt);
     this.checkWin();
@@ -1468,12 +1493,6 @@ export class Game {
       if (mate.agent && this.nav.lineFree(a.x, a.z, mate.agent.x, mate.agent.z)) {
         this.touchRescue(a, mate.agent);
       }
-    }
-
-    // 捕獲（警官の見た目は自動で確保／発覚した潜入捜査官のみ。潜入捜査官は警察につかまらない）
-    if (a.arrestCd <= 0) {
-      const tgt = this.nearest(a, (o) => this.canArrest(a, o), this.cfg.arrestRange);
-      if (tgt.agent) this.arrest(a, tgt.agent);
     }
 
     // 牢屋前のゲージ（解錠 / 救出）
@@ -2065,13 +2084,35 @@ export class Game {
     ];
   }
 
+  /**
+   * Build 6: 警察が確保できる泥棒（＝まだ自由で、正体を隠したままのスパイではない相手）。
+   * 正体を隠したままの潜入捜査官（FBI）／人狼警察は警察に逮捕されないので、
+   * そちらだけが残っても試合が終わらず、時間切れまで「詰み」の試合が続いていた。
+   */
+  freeCatchableThieves() {
+    return this.agents.filter((a) => a.team === 'thief' && a.state === 'free' && !a.isSpy);
+  }
+
   checkWin() {
     if (this.phase !== 'playing') return;
     if (this.securedCount >= this.cfg.treasureRequired) {
       this.finish('thieves', 'お宝をすべて搬出した');
-    } else if (this.agents.filter((a) => a.team === 'thief').every((a) => a.state === 'jailed')) {
-      this.finish('cops', '泥棒を全員確保した');
-    } else if (this.time <= 0) {
+      return;
+    }
+    // Build 3 の約束：発覚して拘束中のスパイがいる間は、まだ勝敗を決めない
+    // （拘束が明けると見た目どおりの陣営で戻ってくる）。
+    const detained = this.agents.some((a) => a.team === 'thief' && a.state === 'detained');
+    // Build 6: 本物の泥棒（寝返り後の元FBIを含む）は全員牢屋。
+    // 自由なのが「正体を隠したままのスパイ」だけなら警察の勝ちで試合を終える。
+    if (!detained && this.freeCatchableThieves().length === 0) {
+      const spyOnly = this.agents.some((a) => a.team === 'thief' && a.state === 'free' && a.isSpy);
+      this.finish(
+        'cops',
+        spyOnly ? '泥棒を全員確保した（残りは確保できないスパイだけ）' : '泥棒を全員確保した',
+      );
+      return;
+    }
+    if (this.time <= 0) {
       const left = this.securedCount;
       this.finish(
         'cops',

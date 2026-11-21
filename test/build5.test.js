@@ -16,11 +16,21 @@ const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 
 const take = (g, pred) => g.agents.find(pred);
 
+// Build 6: 退避させる時は警察と泥棒を別の角に離す。
+// （同じ座標に全員を置くと、その場で確保が起きて「本物の泥棒が全員牢屋」になり、
+//   試合が終わってしまう＝テストの前提が崩れる）
 function park(g, keep = []) {
+  let copI = 0;
+  let thiefI = 0;
   for (const a of g.agents) {
     if (keep.includes(a) || a.state !== 'free') continue;
-    a.x = 73;
-    a.z = 73;
+    if (a.looks === 'cop') {
+      a.x = 73 - (copI++ % 3) * 3.5;
+      a.z = -73 + Math.floor(copI / 3) * 3.5;
+    } else {
+      a.x = -73 + (thiefI++ % 3) * 3.5;
+      a.z = -73 + Math.floor(thiefI / 3) * 3.5;
+    }
     a.path = null;
   }
 }
@@ -467,10 +477,12 @@ test('Build 5 のワークフロー定義（1行目がビルド名コメント�
   assert.match(yml, /returnCooldown: 5/);
   assert.match(yml, /rescueTouchCd: 5/);
   assert.match(yml, /test -f test\/build5\.test\.js/);
+  // 現在のビルド番号（project.pbxproj）は Build 6 のテストで見る
+  // （リポジトリは常に最新ビルドを出荷するため、過去ビルドの番号は固定しない）
   const pbx = read('ios/App/App.xcodeproj/project.pbxproj');
   const versions = [...pbx.matchAll(/CURRENT_PROJECT_VERSION = (\d+);/g)].map((m) => Number(m[1]));
   assert.equal(versions.length, 2, 'ビルド番号の指定が2箇所でない');
-  assert.deepEqual(versions, [5, 5], 'ビルド番号が5になっていない');
+  assert.ok(versions.every((v) => v >= 5), 'ビルド番号が Build 5 より小さい');
 });
 
 test('npm test に Build 5 のテストが入っている', () => {

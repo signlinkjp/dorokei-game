@@ -84,6 +84,8 @@ const ui = {
   langSelect: $('langSelect'),
   timePick: $('timePick'),
   soundPick: $('soundPick'),
+  hintPick: $('hintPick'),
+  pauseHint: $('pauseHint'),
   howtoBtn: $('howtoBtn'),
   settingsBtn: $('settingsBtn'),
   privacyBtn: $('privacyBtn'),
@@ -113,6 +115,8 @@ const DEFAULTS = {
   playerRole: 'auto',
   spyMode: 'both',
   playerSpy: 'random',
+  // Build 6: スティック上の紫の説明バナー（役ヒント）を出すか。初期値は ON。
+  spyHint: true,
 };
 
 function loadSettings() {
@@ -155,6 +159,25 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pageshow', wakeAudio);
 window.addEventListener('focus', wakeAudio);
 window.addEventListener('resize', wakeAudio, { passive: true });
+
+// Build 6: ホーム画面・他アプリから戻った時は、AudioContext の時計（currentTime）が
+// 止まったままのことがある。running でも無音になるので、戻ったら測り直して
+// 必要なら AudioContext ごと作り直す。
+let hiddenSince = 0;
+function onForeground() {
+  if (document.hidden) return;
+  const away = hiddenSince ? performance.now() - hiddenSince : 0;
+  hiddenSince = 0;
+  audio.resumeFromBackground();
+  // 少し待ってもう一度見る（復帰直後は時計がまだ進んでいないことがある）
+  if (away > 250) setTimeout(() => audio.resumeFromBackground(), 260);
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) hiddenSince = performance.now();
+  else onForeground();
+});
+window.addEventListener('pageshow', onForeground);
+window.addEventListener('focus', onForeground);
 
 let game = null;
 let mode = 'title'; // title | playing | ended
@@ -390,6 +413,31 @@ function syncSoundActive() {
   }
 }
 
+// ---- Build 6: 役ヒント（紫の説明バナー）の表示 ON/OFF ----------------------
+function spyHintOn() {
+  return settings.spyHint !== false;
+}
+
+function applySpyHint() {
+  syncSeg('hintPick', 'hint', spyHintOn() ? 'on' : 'off');
+  if (ui.pauseHint) {
+    const label = ui.pauseHint.querySelector('span');
+    const text = t('menu.spyHint', lang());
+    const state = spyHintOn() ? t('settings.soundOn', lang()) : t('settings.soundOff', lang());
+    if (label) label.textContent = `${text} ${state}`;
+  }
+  if (!game) return;
+  const p = game.player;
+  if (p) ui.spyNote.classList.toggle('hidden', !(p.isSpy && spyHintOn()));
+}
+
+function setSpyHint(on) {
+  settings.spyHint = !!on;
+  saveSettings();
+  applySpyHint();
+  audio.play('tap');
+}
+
 // ---- 設定UI ---------------------------------------------------------------
 function bindSeg(id, key, attr, after) {
   const box = $(id);
@@ -435,6 +483,15 @@ ui.soundPick.addEventListener('click', (e) => {
   if (!btn) return;
   setSound(btn.dataset.sound === 'on');
 });
+
+// Build 6: タイトル設定の「役ヒント表示」
+if (ui.hintPick) {
+  ui.hintPick.addEventListener('click', (e) => {
+    const btn = e.target.closest('.seg-btn');
+    if (!btn) return;
+    setSpyHint(btn.dataset.hint === 'on');
+  });
+}
 
 ui.langSelect.addEventListener('change', () => {
   setLang(ui.langSelect.value);
@@ -496,7 +553,7 @@ function startGame(opts = {}) {
   const p = game.player;
   roleSig = '';
   refreshRoleCard(true);
-  ui.spyNote.classList.toggle('hidden', !p.isSpy);
+  ui.spyNote.classList.toggle('hidden', !(p.isSpy && spyHintOn()));
   if (p.isSpy) ui.spyNote.textContent = spyNoteFor(p);
   ui.hiddenNote.classList.add('hidden');
 
@@ -574,6 +631,7 @@ function openPause() {
   ui.pauseConfirm.classList.add('hidden');
   applyI18n(ui.pause, settings.lang);
   ui.pauseSound.textContent = `${audio.enabled ? '🔊' : '🔇'} ${t('menu.sound', lang())}`;
+  applySpyHint();
   refreshRoleCard(true);
   ui.pause.classList.remove('hidden');
   audio.play('tap');
@@ -609,6 +667,10 @@ ui.pauseSound.addEventListener('click', () => {
   setSound(!settings.sound);
   ui.pauseSound.textContent = `${audio.enabled ? '🔊' : '🔇'} ${t('menu.sound', lang())}`;
 });
+// Build 6: プレイ中 MENU からも役ヒント（紫の説明バナー）を切り替えられる
+if (ui.pauseHint) {
+  ui.pauseHint.addEventListener('click', () => setSpyHint(!spyHintOn()));
+}
 ui.pauseHowto.addEventListener('click', () => openModal('howto'));
 ui.pauseSettings.addEventListener('click', () => openModal('settings'));
 
@@ -824,8 +886,8 @@ function updateHud(dt) {
     defectNotice = Math.max(0, defectNotice - dt);
     if (defectNotice === 0) refreshRoleCard(true);
   }
-  // スパイの案内（寝返り後は消す）
-  ui.spyNote.classList.toggle('hidden', !p.isSpy);
+  // スパイの案内（寝返り後は消す／Build 6: 設定で OFF にできる）
+  ui.spyNote.classList.toggle('hidden', !(p.isSpy && spyHintOn()));
   if (p.isSpy) {
     const note = spyNoteFor(p);
     if (ui.spyNote.textContent !== note) ui.spyNote.textContent = note;
@@ -1029,6 +1091,7 @@ syncSeg('spyPick', 'spy', settings.spyMode);
 syncSeg('selfSpyPick', 'self', settings.playerSpy);
 syncSeg('timePick', 'duration', settings.duration);
 syncSoundActive();
+applySpyHint();
 syncDynamicLabels();
 
 requestAnimationFrame(frame);

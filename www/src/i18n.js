@@ -29,8 +29,8 @@ export const STRINGS = {
     en: 'Steal every treasure and escape the cops.<br />But one of your own crew may be a spy.',
   },
   'rule.cop': {
-    ja: '泥棒を全員確保、または時間切れでお宝を1つでも守れば勝ち。',
-    en: 'Jail every thief, or keep at least one treasure safe when time runs out.',
+    ja: '泥棒を全員確保、または時間切れでお宝を1つでも守れば勝ち。残りが正体不明のスパイだけになっても勝ち。',
+    en: 'Jail every thief, or keep at least one treasure safe when time runs out. If only unrevealed spies stay free, cops win too.',
   },
   'rule.thief': {
     ja: 'お宝{n}つを全部ゲートへ運べば勝ち。運搬中は足が遅くなる。',
@@ -166,6 +166,7 @@ export const STRINGS = {
   'menu.yes': { ja: 'はい、戻る', en: 'Yes, quit' },
   'menu.no': { ja: 'キャンセル', en: 'Cancel' },
   'menu.sound': { ja: 'サウンド', en: 'Sound' },
+  'menu.spyHint': { ja: '役ヒント', en: 'Role hint' },
   'menu.hint': {
     ja: 'MENU からはいつでもタイトルへ戻れます。',
     en: 'You can return to the title any time from MENU.',
@@ -193,6 +194,7 @@ export const STRINGS = {
   'settings.title': { ja: '設定', en: 'Settings' },
   'settings.time': { ja: '制限時間', en: 'Time limit' },
   'settings.sound': { ja: 'サウンド', en: 'Sound' },
+  'settings.hint': { ja: '役ヒント表示', en: 'Role hint' },
   'settings.soundOn': { ja: 'ON', en: 'ON' },
   'settings.soundOff': { ja: 'OFF', en: 'OFF' },
   'settings.lang': { ja: '言語', en: 'Language' },
@@ -228,8 +230,8 @@ export const STRINGS = {
     en: 'Free a jailed teammate by touching them or holding at the jail door (1.5s). A rescued thief must wait 5 seconds after escaping before freeing anyone else. Loot can be returned once every 5 seconds.',
   },
   'howto.goalCopDesc': {
-    ja: '泥棒を全員確保する、または時間切れでお宝を1つでも守りきる。',
-    en: 'Jail every thief, or keep at least one treasure safe when time runs out.',
+    ja: '泥棒を全員確保する、または時間切れでお宝を1つでも守りきる。正体を隠したままのスパイ（逮捕できない相手）だけが残っても警察の勝ち。',
+    en: 'Jail every thief, or keep at least one treasure safe when time runs out. If only unrevealed spies (who cannot be arrested) remain, the cops win as well.',
   },
   'howto.goalThief': { ja: '泥棒の勝ち', en: 'Thieves win' },
   'howto.goalThiefDesc': {

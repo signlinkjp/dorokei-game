@@ -34,6 +34,30 @@ page.on('pageerror', (e) => errors.push(e.message));
 await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load' });
 await page.waitForTimeout(1400);
 
+// Build 6: 退避用ヘルパー。警察と泥棒を同じ座標にまとめて置くと、その場で確保が起きて
+// 「本物の泥棒が全員牢屋」になり試合が終わってしまう（＝テストの前提が崩れる）。
+// 警察と泥棒は別の角に分けて退避させる。
+await page.evaluate(() => {
+  window.__parkApart = (g, keep = []) => {
+    let copI = 0;
+    let thiefI = 0;
+    for (const a of g.agents) {
+      if (keep.includes(a) || a.state !== 'free') continue;
+      if (a.looks === 'cop') {
+        a.x = 73 - (copI % 3) * 4;
+        a.z = -73 + Math.floor(copI / 3) * 4;
+        copI += 1;
+      } else {
+        a.x = -73 + (thiefI % 3) * 4;
+        a.z = -73 + Math.floor(thiefI / 3) * 4;
+        thiefI += 1;
+      }
+      a.path = null;
+      a.pathTarget = null;
+    }
+  };
+});
+
 const out = {};
 let fail = 0;
 const check = (ok, msg) => {
@@ -643,7 +667,7 @@ out.occlusion = await page.evaluate(() => {
   const { game, world, freeze } = window.__dorokei;
   freeze(true);
   const p = game.player;
-  for (const a of game.agents) if (a !== p) { a.x = 74; a.z = 74; }
+  window.__parkApart(game, [p]);
   // 美術館（62,-16）のすぐ南に立ち、カメラは美術館の向こう（北）になる
   p.state = 'free';
   p.x = 62;
@@ -684,7 +708,7 @@ out.rescue = await page.evaluate(async () => {
   await new Promise((r) => setTimeout(r, 300));
   const g = window.__dorokei.game;
   const p = g.player;
-  for (const a of g.agents) if (a !== p && a.state === 'free') { a.x = 74; a.z = 74; }
+  window.__parkApart(g, [p]);
   const mate = g.agents.find((a) => a.role === 'thief' && a !== p);
   const slot = g.freeJailSlot();
   mate.state = 'jailed';
@@ -704,7 +728,7 @@ out.rescue = await page.evaluate(async () => {
   const g2 = window.__dorokei.game;
   const spy = g2.player;
   const opp = g2.agents.find((a) => a.role === 'cop' && a !== spy);
-  for (const a of g2.agents) if (a !== spy && a !== opp && a.state === 'free') { a.x = 74; a.z = 74; }
+  window.__parkApart(g2, [spy, opp]);
   spy.x = 0;
   spy.z = 0;
   opp.x = 12;
@@ -765,7 +789,7 @@ out.build5 = await page.evaluate(async () => {
   const g2 = window.__dorokei.game;
   const spy = g2.player;
   const thieves = g2.agents.filter((a) => a.role === 'thief');
-  for (const a of g2.agents) if (a !== spy) { a.x = 73; a.z = 73; }
+  window.__parkApart(g2, [spy]);
   thieves.slice(0, 2).forEach((t, i) => {
     t.state = 'jailed';
     t.jailSlot = i;
@@ -829,6 +853,109 @@ check(out.build5.rescue.reverses <= 6, `救出された泥棒が震えている 
 check(out.build5.cfg.detainTime === 10, `拘束が10秒でない (${out.build5.cfg.detainTime})`);
 check(out.build5.cfg.returnCooldown === 5, `お宝戻しのクールタイムが5秒でない (${out.build5.cfg.returnCooldown})`);
 check(out.build5.cfg.rescueTouchCd === 5, `救出後のクールタイムが5秒でない (${out.build5.cfg.rescueTouchCd})`);
+await page.evaluate(() => window.__dorokei.freeze(false));
+
+// ---- Build 6: 役ヒント ON/OFF・確保の手触り・スパイだけ残った時の決着・音の時計 ---
+out.build6 = await page.evaluate(async () => {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const { startGame, audio } = window.__dorokei;
+
+  // 1) スパイで始めると紫の説明バナーが出る → MENU から OFF にすると消えて保存される
+  startGame({ players: 8, playerRole: 'thief', playerSpy: 'always', spyMode: 'both', seed: 21 });
+  await wait(320);
+  const note = document.getElementById('spyNote');
+  const noteOn = { hidden: note.classList.contains('hidden'), text: note.textContent.slice(0, 12) };
+  document.getElementById('menuBtn').click();
+  await wait(120);
+  const pauseLabel = document.getElementById('pauseHint').textContent.trim();
+  document.getElementById('pauseHint').click();
+  await wait(120);
+  document.getElementById('pauseClose').click();
+  await wait(200);
+  const noteOff = { hidden: note.classList.contains('hidden'), saved: window.__dorokei.settings.spyHint };
+  const rawOff = localStorage.getItem('dorokei.settings.v1') || '';
+  // タイトル設定（設定パネル）の ON/OFF でも戻せる
+  window.__dorokei.openModal('settings');
+  await wait(80);
+  document.querySelector('#hintPick .seg-btn[data-hint="on"]').click();
+  await wait(150);
+  window.__dorokei.closeModal();
+  await wait(150);
+  const noteBack = { hidden: note.classList.contains('hidden'), saved: window.__dorokei.settings.spyHint };
+  const rawOn = localStorage.getItem('dorokei.settings.v1') || '';
+
+  // 2) 泥棒に触れていれば1フレームで確保できる（旧1.9mでは届かない 2.2m）
+  startGame({ players: 8, playerRole: 'cop', playerSpy: 'never', spyMode: 'none', seed: 12 });
+  await wait(320);
+  const g2 = window.__dorokei.game;
+  const cop = g2.player;
+  const thief = g2.agents.find((a) => a.role === 'thief');
+  window.__parkApart(g2, [cop, thief]);
+  cop.x = 0;
+  cop.z = 0;
+  cop.arrestCd = 0;
+  thief.x = 2.2;
+  thief.z = 0;
+  thief.path = null;
+  const before = g2.stats.arrests;
+  g2.resolveArrests();
+  const arrest = {
+    range: g2.cfg.arrestRange,
+    cooldown: g2.cfg.arrestCooldown,
+    jailed: thief.state === 'jailed',
+    gained: g2.stats.arrests - before,
+    cdNow: +cop.arrestCd.toFixed(1),
+  };
+
+  // 3) 本物の泥棒が全員牢屋で残りが未発覚のスパイだけ → その場で警察の勝利
+  startGame({ players: 8, playerRole: 'cop', playerSpy: 'never', spyMode: 'cops', seed: 9 });
+  await wait(320);
+  const g3 = window.__dorokei.game;
+  const mole = g3.agents.find((a) => a.role === 'copSpy');
+  window.__parkApart(g3, [mole]);
+  let n = 0;
+  for (const a of g3.agents) {
+    if (a.role !== 'thief' || a.state !== 'free') continue;
+    a.state = 'jailed';
+    a.jailSlot = n;
+    a.x = -68 + (n % 3) * 6;
+    a.z = n < 3 ? 58 : 65;
+    n += 1;
+  }
+  g3.step(1 / 60);
+  const win = { phase: g3.phase, winner: g3.winner, reason: g3.reason, jailed: n };
+
+  // 4) タイトルの表記が Build 6 になっている
+  const versionEl = document.querySelector('.version');
+  const versionLabel = versionEl ? versionEl.textContent : '';
+
+  // 5) state が running のまま currentTime だけ止まる（WKWebView の症状）→ 作り直す
+  audio.unlock();
+  audio.startMusic();
+  const ctx0 = audio.ctx;
+  Object.defineProperty(ctx0, 'currentTime', { value: 10, configurable: true, writable: true });
+  const t0 = performance.now() + 100000;
+  audio.tick(t0);
+  audio.tick(t0 + 900);
+  const audioRebuilt = audio.ctx !== ctx0;
+  const ctxState = audio.ctx.state;
+  audio.stopMusic();
+
+  return { noteOn, pauseLabel, noteOff, rawOff, noteBack, rawOn, arrest, win, versionLabel, audioRebuilt, ctxState };
+});
+check(!out.build6.noteOn.hidden && out.build6.noteOn.text.length > 0, 'スパイの紫バナーが出ない');
+check(/役ヒント/.test(out.build6.pauseLabel), `MENU の役ヒント切替がない (${out.build6.pauseLabel})`);
+check(out.build6.noteOff.hidden === true, '役ヒント OFF でバナーが消えない');
+check(out.build6.noteOff.saved === false && /"spyHint":false/.test(out.build6.rawOff), '役ヒント OFF が保存されない');
+check(out.build6.noteBack.hidden === false, '役ヒントを ON に戻してもバナーが出ない');
+check(out.build6.noteBack.saved === true && /"spyHint":true/.test(out.build6.rawOn), '役ヒント ON が保存されない');
+check(out.build6.arrest.range >= 2.3, `確保距離が狭い (${out.build6.arrest.range})`);
+check(out.build6.arrest.jailed && out.build6.arrest.gained === 1, '触れているのに確保できない');
+check(Math.abs(out.build6.arrest.cooldown - 2) < 0.01, `確保クールタイムが2秒でない (${out.build6.arrest.cooldown})`);
+check(out.build6.win.phase === 'ended' && out.build6.win.winner === 'cops', 'スパイだけ残っても試合が終わらない');
+check(/スパイ/.test(out.build6.win.reason), `決着の理由が分からない (${out.build6.win.reason})`);
+check(/Build 6/.test(out.build6.versionLabel), `タイトルのビルド表記が Build 6 でない (${out.build6.versionLabel})`);
+check(out.build6.audioRebuilt && out.build6.ctxState === 'running', '時計が止まったままの音を作り直せない');
 await page.evaluate(() => window.__dorokei.freeze(false));
 
 // ---- リザルト -------------------------------------------------------------

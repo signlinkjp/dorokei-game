@@ -674,6 +674,154 @@ if (want('b5-howto')) {
   await page.close();
 }
 
+
+// ---- Build 6: タイトル（Build 6 表記） --------------------------------------
+if (want('b6-title')) {
+  const page = await openPage(PHONE);
+  await page.goto(base, { waitUntil: 'load' });
+  await page.waitForTimeout(2000);
+  const info = await page.evaluate(() => ({
+    version: document.querySelector('.version')?.textContent,
+    goalCop: [...document.querySelectorAll('.rules .rule')].map((r) => r.textContent.trim().slice(0, 40)),
+  }));
+  console.log('b6-title:', JSON.stringify(info));
+  await shoot(page, 'dorokei-b6-title.png', 400);
+  await page.close();
+}
+
+// ---- Build 6: 役ヒント（紫の説明バナー）ON/OFF の設定 ----------------------
+if (want('b6-settings')) {
+  const page = await openPage(PHONE);
+  await page.goto(base, { waitUntil: 'load' });
+  await page.waitForTimeout(1800);
+  const info = await page.evaluate(() => {
+    window.__dorokei.openModal('settings');
+    const row = document.querySelector('#hintPick').closest('.set-row');
+    return { row: row ? row.textContent.trim() : null, active: document.querySelector('#hintPick .seg-btn.active')?.dataset.hint };
+  });
+  console.log('b6-settings:', JSON.stringify(info));
+  await shoot(page, 'dorokei-b6-settings.png', 500);
+  await page.close();
+}
+
+// ---- Build 6: スパイの紫バナー ON / OFF と MENU の切替 --------------------
+if (want('b6-spy')) {
+  const page = await openPage({ width: 932, height: 430 });
+  await page.goto(`${base}?demo=1&team=thief&self=always&spy=both&seed=21&warp=6&hud=1`, { waitUntil: 'load' });
+  await page.waitForTimeout(1800);
+  const on = await page.evaluate(async () => {
+    const { game, world } = window.__dorokei;
+    window.__dorokei.freeze(true);
+    const p = game.player;
+    p.x = 0;
+    p.z = 40;
+    p.dir = Math.PI;
+    world.setView('follow');
+    world.snapCamera();
+    world.update(game, 1 / 60);
+    const note = document.getElementById('spyNote');
+    return { role: p.role, hidden: note.classList.contains('hidden'), text: note.textContent.slice(0, 20) };
+  });
+  console.log('b6-spy(on):', JSON.stringify(on));
+  await shoot(page, 'dorokei-b6-spy.png', 400);
+  // MENU を開いて「💡 役ヒント」を押し、OFF の見た目も撮る
+  const off = await page.evaluate(async () => {
+    document.getElementById('menuBtn').click();
+    await new Promise((r) => setTimeout(r, 160));
+    const label = document.getElementById('pauseHint').textContent.trim();
+    document.getElementById('pauseHint').click();
+    await new Promise((r) => setTimeout(r, 200));
+    document.getElementById('pauseClose').click();
+    await new Promise((r) => setTimeout(r, 260));
+    const note = document.getElementById('spyNote');
+    return { label, hidden: note.classList.contains('hidden'), saved: window.__dorokei.settings.spyHint };
+  });
+  console.log('b6-spy(off):', JSON.stringify(off));
+  await shoot(page, 'dorokei-b6-spy-off.png', 400);
+  // 元に戻す
+  await page.evaluate(() => window.__dorokei.setSound(window.__dorokei.settings.sound));
+  await page.close();
+}
+
+// ---- Build 6: 触れているのに確保できないバグの修正（2.0mで確保） ----------
+if (want('b6-arrest')) {
+  const page = await openPage({ width: 932, height: 430 });
+  await page.goto(`${base}?demo=1&team=cop&self=never&spy=none&seed=12&warp=8&hud=1`, { waitUntil: 'load' });
+  await page.waitForTimeout(1800);
+  const before = await page.evaluate(async () => {
+    const { game, world } = window.__dorokei;
+    const p = game.player;
+    for (const a of game.agents) if (a !== p) { a.x = 72; a.z = 72; }
+    const thief = game.agents.find((a) => a.role === 'thief');
+    thief.x = 0;
+    thief.z = 40;
+    thief.state = 'free';
+    thief.path = null;
+    p.x = 2.0;
+    p.z = 40;
+    p.dir = -Math.PI / 2;
+    thief.dir = Math.PI / 2;
+    p.arrestCd = 0;
+    window.__dorokei.freeze(true);
+    world.setView('follow');
+    world.snapCamera();
+    world.update(game, 1 / 60);
+    const d = Math.hypot(p.x - thief.x, p.z - thief.z);
+    return { dist: +d.toFixed(2), range: game.cfg.arrestRange, thief: thief.state };
+  });
+  console.log('b6-arrest(before):', JSON.stringify(before));
+  await shoot(page, 'dorokei-b6-arrest.png', 400);
+  const after = await page.evaluate(async () => {
+    const { game, world } = window.__dorokei;
+    game.resolveArrests();
+    world.update(game, 1 / 60);
+    return {
+      arrests: game.stats.arrests,
+      jail: game.counts().jailed,
+      feed: [...document.querySelectorAll('#eventFeed .ev')].map((d) => d.textContent).slice(-2),
+    };
+  });
+  console.log('b6-arrest(after):', JSON.stringify(after));
+  await shoot(page, 'dorokei-b6-arrest-caught.png', 400);
+  await page.close();
+}
+
+// ---- Build 6: 残りがスパイだけになった時の決着（時間切れまで詰まない） -----
+if (want('b6-win')) {
+  const page = await openPage(PHONE);
+  await page.goto(`${base}?demo=1&team=cop&self=never&spy=cops&seed=9&warp=10&hud=1`, { waitUntil: 'load' });
+  await page.waitForTimeout(1800);
+  const info = await page.evaluate(async () => {
+    const { game } = window.__dorokei;
+    const mole = game.agents.find((a) => a.role === 'copSpy');
+    for (const a of game.agents) {
+      if (a === mole || a.state !== 'free') continue;
+      if (a.looks === 'cop') { a.x = 70; a.z = -70; } else { a.x = -70; a.z = -70; }
+    }
+    let n = 0;
+    for (const a of game.agents) {
+      if (a.role !== 'thief' || a.state !== 'free') continue;
+      a.state = 'jailed';
+      a.jailSlot = n;
+      a.x = -68 + (n % 3) * 6;
+      a.z = n < 3 ? 58 : 65;
+      n += 1;
+    }
+    game.step(1 / 60);
+    await new Promise((r) => setTimeout(r, 400));
+    return {
+      phase: game.phase,
+      winner: game.winner,
+      reason: game.reason,
+      title: document.getElementById('resultTitle').textContent,
+      shown: !document.getElementById('result').classList.contains('hidden'),
+    };
+  });
+  console.log('b6-win:', JSON.stringify(info));
+  await shoot(page, 'dorokei-b6-win.png', 400);
+  await page.close();
+}
+
 const errors = logs.filter((l) => /\[error\]|pageerror/i.test(l));
 console.log('console errors:', errors.length ? errors.join('\n') : '(none)');
 if (logs.length > errors.length) console.log('warnings:', logs.length - errors.length);
