@@ -368,7 +368,7 @@ try {
 out.detainCard = await roleOf();
 check(out.detainStart.state === 'detained', '発覚しても拘束状態にならない');
 check(out.detainStart.jail, '拘束中のカメラが俯瞰にならない');
-check(/15秒拘束中/.test(out.detainCard.tag), `拘束中バッジが出ない (${out.detainCard.tag})`);
+check(/10秒拘束中/.test(out.detainCard.tag), `拘束中バッジが出ない (${out.detainCard.tag})`);
 check(
   /あと\d+秒後に泥棒へ転向/.test(out.detainCard.mission),
   `転向カウントダウンが読めない (${out.detainCard.mission})`,
@@ -726,6 +726,109 @@ const alertDom = await page.evaluate(() => {
   return { hidden: el.classList.contains('hidden'), text: el.textContent };
 });
 check(!alertDom.hidden && /接近/.test(alertDom.text), `⚠ 接近！の表示が出ない (${alertDom.text})`);
+await page.evaluate(() => window.__dorokei.freeze(false));
+
+// ---- Build 5: 音の復帰・識別タグの大きさ・救出まわり -------------------
+out.build5 = await page.evaluate(async () => {
+  const { audio, startGame, world } = window.__dorokei;
+  // 1) AudioContext をわざと止める（iOS の interrupted / 2回目プレイ相当）
+  audio.unlock();
+  audio.startMusic();
+  const ctx0 = audio.ctx;
+  const stateBefore = (await ctx0.suspend(), ctx0.state);
+  audio.tick(performance.now());
+  await new Promise((r) => setTimeout(r, 250));
+  audio.tick(performance.now() + 1000);
+  const stateAfter = audio.ctx.state;
+  const rebuilt = audio.ctx !== ctx0 ? 'new' : 'same';
+
+  // 2) 2回目のゲームでも BGM が鳴り続ける（音符が積まれているか）
+  startGame({ players: 8, playerRole: 'thief', playerSpy: 'never', spyMode: 'none', seed: 5 });
+  await new Promise((r) => setTimeout(r, 400));
+  audio.startMusic();
+  const running = audio.ctx.state;
+
+  // 3) 頭上の識別タグの大きさ（自分と仲間）
+  const g = window.__dorokei.game;
+  const p = g.player;
+  const mate = g.agents.find((a) => a !== p);
+  const tagOf = (a) => {
+    const grp = world.chars.get(a.id);
+    const tag = grp && grp.userData && grp.userData.tag;
+    return tag ? { w: +tag.scale.x.toFixed(2), h: +tag.scale.y.toFixed(2), y: +tag.position.y.toFixed(2) } : null;
+  };
+  const tags = { me: tagOf(p), mate: tagOf(mate) };
+
+  // 4) 人狼警察の解錠で救出された泥棒が震えずに逃げる（Build 5 のバグ修正）
+  startGame({ players: 8, playerRole: 'cop', playerSpy: 'always', spyMode: 'both', seed: 4 });
+  await new Promise((r) => setTimeout(r, 350));
+  const g2 = window.__dorokei.game;
+  const spy = g2.player;
+  const thieves = g2.agents.filter((a) => a.role === 'thief');
+  for (const a of g2.agents) if (a !== spy) { a.x = 73; a.z = 73; }
+  thieves.slice(0, 2).forEach((t, i) => {
+    t.state = 'jailed';
+    t.jailSlot = i;
+    t.jailedAt = 0;
+    t.x = -68 + i * 6;
+    t.z = 58;
+  });
+  spy.x = -62;
+  spy.z = 52.6;
+  g2.setPlayerMove(0, 0);
+  g2.setAction(true);
+  let freed = null;
+  for (let i = 0; i < 60 * 4 && !freed; i++) {
+    g2.step(1 / 60);
+    freed = thieves.slice(0, 2).find((t) => t.state === 'free') || null;
+  }
+  g2.setAction(false);
+  const start = freed ? { x: freed.x, z: freed.z } : null;
+  const touchCdAtRescue = freed ? freed.touchCd : null;
+  // 0.25秒ごとの位置で「動いた距離」と「その場での震え（向きの反転）」を見る
+  const pts = [];
+  for (let i = 0; i < 60 * 6; i++) {
+    g2.step(1 / 60);
+    if (i % 15 === 0) pts.push({ x: freed.x, z: freed.z });
+  }
+  let moved = 0;
+  let reverses = 0;
+  for (let i = 1; i < pts.length; i++) {
+    moved += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
+    if (i >= 2) {
+      const v1 = { x: pts[i - 1].x - pts[i - 2].x, z: pts[i - 1].z - pts[i - 2].z };
+      const v2 = { x: pts[i].x - pts[i - 1].x, z: pts[i].z - pts[i - 1].z };
+      const m1 = Math.hypot(v1.x, v1.z);
+      const m2 = Math.hypot(v2.x, v2.z);
+      if (m1 > 0.05 && m2 > 0.05 && (v1.x * v2.x + v1.z * v2.z) / (m1 * m2) < -0.5) reverses += 1;
+    }
+  }
+  const rescue = {
+    freed: !!freed,
+    touchCd: touchCdAtRescue == null ? null : +touchCdAtRescue.toFixed(1),
+    moved: +moved.toFixed(1),
+    reverses,
+  };
+
+  // 5) 拘束は10秒・お宝戻しは5秒
+  const cfg = { detainTime: g2.cfg.detainTime, returnCooldown: g2.cfg.returnCooldown, rescueTouchCd: g2.cfg.rescueTouchCd };
+  return { stateBefore, stateAfter, rebuilt, running, tags, rescue, cfg };
+});
+check(out.build5.stateBefore === 'suspended', 'AudioContext を止められない');
+check(
+  out.build5.stateAfter === 'running' || out.build5.rebuilt === 'new',
+  `止まった音が復帰しない (${out.build5.stateBefore} → ${out.build5.stateAfter})`,
+);
+check(out.build5.running === 'running', '2回目のプレイで AudioContext が鳴らない');
+check(out.build5.tags.me && out.build5.tags.me.w >= 1.2, `自分のタグが小さい (${JSON.stringify(out.build5.tags.me)})`);
+check(out.build5.tags.mate && out.build5.tags.mate.w >= 0.8, `仲間のタグが小さい (${JSON.stringify(out.build5.tags.mate)})`);
+check(out.build5.rescue.freed, '解錠で救出できない');
+check(out.build5.rescue.touchCd >= 4.5, `救出された側に5秒のクールタイムがない (${out.build5.rescue.touchCd})`);
+check(out.build5.rescue.moved > 8, `救出された泥棒が動かない (${out.build5.rescue.moved}m)`);
+check(out.build5.rescue.reverses <= 6, `救出された泥棒が震えている (${out.build5.rescue.reverses})`);
+check(out.build5.cfg.detainTime === 10, `拘束が10秒でない (${out.build5.cfg.detainTime})`);
+check(out.build5.cfg.returnCooldown === 5, `お宝戻しのクールタイムが5秒でない (${out.build5.cfg.returnCooldown})`);
+check(out.build5.cfg.rescueTouchCd === 5, `救出後のクールタイムが5秒でない (${out.build5.cfg.rescueTouchCd})`);
 await page.evaluate(() => window.__dorokei.freeze(false));
 
 // ---- リザルト -------------------------------------------------------------

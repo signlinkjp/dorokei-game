@@ -1,5 +1,5 @@
 // Build 3 の新機能テスト
-//   スパイ呼び名の統一／発覚→牢屋で15秒拘束→相手陣営へ寝返り（1試合1回）／
+//   スパイ呼び名の統一／発覚→牢屋で10秒拘束→相手陣営へ寝返り（1試合1回）／
 //   拘束中の扱い（動けない・救出されない・勝敗判定）／警察署の中の牢屋レイアウト／HUD
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -64,9 +64,9 @@ test('寝返り先は「見た目どおりの陣営」の通常メンバー', ()
   assert.equal(betrayRoleOf(ROLE.THIEF), ROLE.THIEF);
 });
 
-// ---- 15秒拘束 → 寝返り ---------------------------------------------------
-test('スパイは発覚すると牢屋へ移送され、15秒間は動けず行動もできない', () => {
-  assert.equal(CFG.detainTime, 15);
+// ---- 10秒拘束 → 寝返り（Build 5: 15 → 10秒） ------------------------------
+test('スパイは発覚すると牢屋へ移送され、10秒間は動けず行動もできない', () => {
+  assert.equal(CFG.detainTime, 10);
   const g = makeGame({ playerRole: 'cop', playerSpy: 'always' });
   const spy = g.player;
   assert.equal(spy.role, ROLE.COP_SPY);
@@ -74,7 +74,7 @@ test('スパイは発覚すると牢屋へ移送され、15秒間は動けず行
 
   g.expose(spy);
   assert.equal(spy.state, 'detained');
-  assert.equal(spy.detainLeft, 15);
+  assert.equal(spy.detainLeft, 10);
   assert.equal(g.stats.exposures, 1);
   const slot = spy.jailSlot;
   assert.ok(slot >= 0);
@@ -92,11 +92,11 @@ test('スパイは発覚すると牢屋へ移送され、15秒間は動けず行
   assert.equal(spy.actionT, 0);
   assert.equal(g.stats.unlocks, 0);
   assert.equal(spy.state, 'detained');
-  assert.ok(spy.detainLeft > 12.9 && spy.detainLeft < 13.1);
+  assert.ok(spy.detainLeft > 7.8 && spy.detainLeft < 8.2);
   assert.equal(g.events.some((e) => e.type === 'expose'), true);
 });
 
-test('15秒たつと元の陣営を捨て、見た目どおりの陣営へ強制転向する（1試合1回）', () => {
+test('10秒たつと元の陣営を捨て、見た目どおりの陣営へ強制転向する（1試合1回）', () => {
   const g = makeGame({ playerRole: 'thief', playerSpy: 'always', spyMode: 'thieves' });
   const spy = g.player;
   assert.equal(spy.role, ROLE.THIEF_SPY);
@@ -104,8 +104,8 @@ test('15秒たつと元の陣営を捨て、見た目どおりの陣営へ強制
   park(g, [spy]);
 
   g.expose(spy);
-  g.stepSeconds(14);
-  assert.equal(spy.state, 'detained', '14秒ではまだ拘束中');
+  g.stepSeconds(9);
+  assert.equal(spy.state, 'detained', '9秒ではまだ拘束中');
   assert.equal(spy.team, 'cop');
   g.stepSeconds(1.2);
   assert.equal(spy.state, 'free');
@@ -192,7 +192,7 @@ test('泥棒が全員拘束・牢屋にいても、拘束中のスパイだけ�
   g.expose(mole);
   g.checkWin();
   assert.equal(g.phase, 'playing');
-  // 15秒後に警察へ寝返ると泥棒陣営が空になり、警察の勝ちが成立する
+  // 10秒後に警察へ寝返ると泥棒陣営が空になり、警察の勝ちが成立する
   g.stepSeconds(CFG.detainTime + 0.2);
   assert.equal(mole.team, 'cop');
   g.checkWin();
@@ -313,8 +313,8 @@ test('役とミッションの文言が14言語の土台（ja/en）で揃って�
   assert.match(t('role.detainedMission', 'ja'), /\{n\}/);
   assert.match(t('role.detainedMission', 'ja'), /\{team\}/);
   assert.match(t('role.defectedChip', 'en'), /\{team\}/);
-  // 15秒・寝返りの説明が入っている
-  assert.match(t('howto.betrayDesc', 'ja'), /15秒/);
+  // 10秒・寝返りの説明が入っている（Build 5）
+  assert.match(t('howto.betrayDesc', 'ja'), /10秒/);
   assert.match(t('howto.betrayDesc', 'ja'), /寝返/);
 });
 

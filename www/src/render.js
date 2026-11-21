@@ -132,34 +132,44 @@ function policePatchTexture() {
 }
 
 /**
- * キャラの識別タグ（Build 4）。
- * 頭上に「YOU」または A/B/C… を極小で出し、寝返りで見た目が変わっても
+ * キャラの識別タグ（Build 4 → Build 5 で大型化）。
+ * 頭上に「YOU」または A/B/C… を出し、寝返りで見た目が変わっても
  * 「誰が誰か」を見失わないようにする。文字色は現在の見た目（警官=青／泥棒=橙）。
+ * Build 5: 極小で読めないと言われたので、縁取り＋影を付けて大きくした。
  */
 function tagTexture(text, color = '#ffffff', ring = 'rgba(12,22,46,0.72)') {
   const c = document.createElement('canvas');
-  c.width = 256;
-  c.height = 128;
+  c.width = 320;
+  c.height = 160;
   const g = c.getContext('2d');
-  g.clearRect(0, 0, 256, 128);
+  g.clearRect(0, 0, 320, 160);
+  // 太い白フチにして、明るい道路の上でも輪郭が残るようにする
+  g.strokeStyle = 'rgba(255,255,255,0.92)';
+  g.lineWidth = 10;
   g.fillStyle = ring;
   g.beginPath();
-  const r = 40;
-  g.moveTo(r, 8);
-  g.lineTo(256 - r, 8);
-  g.quadraticCurveTo(248, 8, 248, 8 + r);
-  g.lineTo(248, 120 - r);
-  g.quadraticCurveTo(248, 120, 248 - r, 120);
-  g.lineTo(r, 120);
-  g.quadraticCurveTo(8, 120, 8, 120 - r);
-  g.lineTo(8, 8 + r);
-  g.quadraticCurveTo(8, 8, 8 + r, 8);
+  const r = 52;
+  g.moveTo(r, 10);
+  g.lineTo(320 - r, 10);
+  g.quadraticCurveTo(310, 10, 310, 10 + r);
+  g.lineTo(310, 150 - r);
+  g.quadraticCurveTo(310, 150, 310 - r, 150);
+  g.lineTo(r, 150);
+  g.quadraticCurveTo(10, 150, 10, 150 - r);
+  g.lineTo(10, 10 + r);
+  g.quadraticCurveTo(10, 10, 10 + r, 10);
+  g.closePath();
   g.fill();
+  g.stroke();
   g.fillStyle = color;
-  g.font = `bold ${text.length > 1 ? 62 : 78}px "Liberation Sans", "Helvetica Neue", system-ui, sans-serif`;
+  g.font = `bold ${text.length > 1 ? 96 : 112}px "Liberation Sans", "Helvetica Neue", system-ui, sans-serif`;
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.fillText(text, 128, 68);
+  // 下に暗い影を敷いて、白文字が空や建物に紛れないようにする
+  g.shadowColor = 'rgba(0,0,0,0.55)';
+  g.shadowBlur = 6;
+  g.shadowOffsetY = 3;
+  g.fillText(text, 160, 86);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
@@ -214,11 +224,11 @@ function tagTexFor(text, look, isPlayer) {
   const key = `${text}|${look}|${isPlayer ? 1 : 0}`;
   if (TAG_TEX.has(key)) return TAG_TEX.get(key);
   const ring = isPlayer
-    ? 'rgba(196,138,0,0.92)'
+    ? 'rgba(214,150,0,0.94)'
     : look === 'cop'
-      ? 'rgba(20,48,104,0.82)'
-      : 'rgba(94,44,10,0.82)';
-  const color = isPlayer ? '#fff6cf' : '#ffffff';
+      ? 'rgba(18,44,100,0.9)'
+      : 'rgba(112,50,8,0.9)';
+  const color = isPlayer ? '#fff8d8' : '#ffffff';
   const tex = tagTexture(text, color, ring);
   TAG_TEX.set(key, tex);
   return tex;
@@ -1411,7 +1421,7 @@ export class World {
     g.add(carry);
 
     // ---- Build 4: 頭上の識別タグ（自分は YOU、仲間は A / B / C …） ----
-    // 極小サイズで視認を邪魔せず、拘束→寝返りで服の色が変わっても同じ文字で追える。
+    // Build 5: スマホでも読める大きさに拡大（プレイの邪魔をしない高さはそのまま）
     const tagText = a.isPlayer ? 'YOU' : tagLetter(a.name);
     const tag = new THREE.Sprite(
       new THREE.SpriteMaterial({
@@ -1422,8 +1432,8 @@ export class World {
         depthTest: !a.isPlayer,
       }),
     );
-    tag.scale.set(a.isPlayer ? 0.94 : 0.54, a.isPlayer ? 0.47 : 0.27, 1);
-    tag.position.set(0, a.isPlayer ? 2.16 : 2.04, 0);
+    tag.scale.set(a.isPlayer ? 1.26 : 0.84, a.isPlayer ? 0.63 : 0.42, 1);
+    tag.position.set(0, a.isPlayer ? 2.42 : 2.3, 0);
     tag.renderOrder = 6;
     g.add(tag);
 
@@ -1453,7 +1463,8 @@ export class World {
     // 正体発覚マーク
     const alert = new THREE.Sprite(makeLabel('!', '#ffffff', 'rgba(214,40,40,0.96)', 120));
     alert.scale.set(1.4, 1.4, 1);
-    alert.position.set(0, 2.5, 0);
+    // Build 5: 識別タグを大きくしたので、重ならないよう上に逃げす
+    alert.position.set(0, 3.25, 0);
     alert.visible = false;
 
     g.add(shadow, alert);

@@ -528,7 +528,7 @@ test('POLICE ロゴを警察の背中に入れ、頭上に極小の YOU / A / B 
   assert.match(js, /tagTexture/);
   assert.match(js, /tagLetter/);
   assert.match(js, /a\.isPlayer \? 'YOU' : tagLetter\(a\.name\)/);
-  assert.match(js, /tag\.scale\.set\(a\.isPlayer \? 0\.94 : 0\.54/);
+  assert.match(js, /tag\.scale\.set\(a\.isPlayer \? [\d.]+ : [\d.]+/);
   // 寝返りで見た目が変わったらタグの色も合わせる
   assert.match(js, /g\.userData\.look !== a\.looks/);
 });
@@ -635,12 +635,16 @@ test('Build 4 のワークフロー定義（1行目が # で始まり、BUILD_NU
   assert.match(yml, /test\/build4\.test\.js/);
 
   const pbx = read('ios/App/App.xcodeproj/project.pbxproj');
-  assert.equal((pbx.match(/CURRENT_PROJECT_VERSION = 4;/g) || []).length, 2);
+  // Build 4 以降、ビルド番号は Build 5 へ引き継がれる（2箇所とも同じ番号で、巻き戻らない）
+  const versions = [...pbx.matchAll(/CURRENT_PROJECT_VERSION = (\d+);/g)].map((m) => Number(m[1]));
+  assert.equal(versions.length, 2);
+  assert.equal(new Set(versions).size, 1, '2箇所のビルド番号が揃っている');
+  assert.ok(versions[0] >= 4, 'ビルド番号が Build 4 より戻っていない');
   assert.ok(!/CURRENT_PROJECT_VERSION = 3;/.test(pbx));
 
   const pkg = JSON.parse(read('package.json'));
   assert.match(pkg.scripts.test, /test\/build4\.test\.js/);
-  assert.match(read('www/index.html'), /Build 4/);
+  assert.match(read('www/index.html'), /Build [45]/);
 });
 
 // ---- 新しいスパイルール（Build 4） ---------------------------------------
@@ -686,7 +690,7 @@ test('潜入捜査官の発覚は「ゲートのお宝戻し作業」を見ら�
   g.stepSeconds(1.5);
   assert.equal(spy.exposed, false, '作業していないのに発覚した');
   assert.equal(spy.state, 'free');
-  // ゲートで戻し作業を泥棒に見られると発覚 → 15秒拘束
+  // ゲートで戻し作業を泥棒に見られると発覚 → 拘束（Build 5 で10秒）
   spy.x = MAP.gate.x;
   spy.z = MAP.gate.z + 2;
   witness.x = MAP.gate.x + 3;
@@ -744,7 +748,7 @@ test('「密告」の表現と位置ピンは廃止され、「お宝を戻す�
 test('お宝を戻した直後はクールタイムがあり、連発で封殺しない', () => {
   const g = new Game({ seed: 65, players: 8, playerRole: 'thief', playerSpy: 'always', spyMode: 'thieves' });
   const spy = g.player;
-  assert.ok(g.cfg.returnCooldown >= 20, 'クールタイムが短すぎる');
+  assert.ok(g.cfg.returnCooldown >= 5, 'クールタイムが短すぎる');
   g.treasures[0].state = 'secured';
   g.treasures[1].state = 'secured';
   park(g, [spy]);

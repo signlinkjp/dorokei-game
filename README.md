@@ -1,4 +1,4 @@
-# DOROKEI — ドロケー × 人狼（Build 4：人数選択4〜10人・タッチ救出・ビル透過・コピー抑止）
+# DOROKEI — ドロケー × 人狼（Build 5：無音バグ修正・タグ拡大・救出後バグ修正・拘束10秒・戻し5秒）
 
 警官と泥棒の鬼ごっこ（ドロケー）に、人狼の「スパイ」を混ぜた 3D アクション。
 HTML/CSS/JS + Three.js（CDN 不使用・`www/vendor/three.module.js` に同梱）だけで動き、
@@ -8,6 +8,37 @@ Capacitor の iOS シェル（`ios/`）でそのままアプリになります�
 - **150m × 150m** の広い街（銀行・宝石店・美術館・公園・駅・商店街・駐車場・路地・警察署）
 - 右上に **ミニマップ（レーダー）**、左下バーチャルスティック、右下の文脈アクションボタン
 - お宝は **10箇所の候補から人数に応じて3〜5個** をランダム配置（捕まった時・戻された時は別の場所へ隠し戻し）
+
+## Build 5 で入ったもの（22:59 の実機フィードバック＋6項目）
+
+1. **2回目プレイ・バックグラウンド復帰後に音が無音のまま戻らないバグを修正**（`audio.js` / `main.js`）：
+   iOS が画面収録・電話・Siri・バックグラウンド復帰などで `AudioContext` を `suspended` /
+   `interrupted` / `closed` にすると、従来は `suspended` の時しか `resume()` を呼ばず、
+   `interrupted` は放置・`closed` は永久に無音だった。**毎フレームの見張り `audio.tick()`** で
+   復帰を試み、800ms間隔で `resume()`、3回失敗したら **AudioContext ごと作り直す**。
+   `visibilitychange` / `pageshow` / `focus` / タップのたびに起こし、BGM の予約はフレーム駆動にして
+   `setInterval` の間引きに強くした（止まった間にたまった音符を一気に鳴らさないよう同期も追加）。
+2. **頭上の識別タグ（YOU / A〜J）を読める大きさに**：自分 **1.26×0.63**（従来 0.94×0.47）、
+   仲間 **0.84×0.42**（従来 0.54×0.27）。白い太フチ＋影を付け、明るい道路の上でも潰れない。
+   頭上 2.3〜2.42m のままなのでプレイの視界は塞がない。
+3. **人狼警察が解錠で救出した泥棒が、その後その場で震えて固まるバグを修正**：救出された泥棒は
+   解錠した警官のすぐ近く（4.5m）に降ろされ、「逃げる（4.5m未満）↔お宝へ向かう（4.5m以上）」が
+   1フレームごとに入れ替わって左右0.1mで振動していた（seed 4 で10秒に26mしか動かない）。
+   逃走に **1.4秒の継続（`fleeHold`）** を持たせ、逃げている間は警戒距離を 4.5→7.5m に広げた。
+   あわせて救出時に古い経路・回り込み・引っかかり・隠れ予定をリセットし、茂みで隠れた瞬間に
+   即解除される現象（`hidNow`）も修正。修正後は10秒で67m・向きの反転ほぼ0。
+4. **救出された側の泥棒は、自分の逃走から5秒たつまで次の仲間を助けられない**（`rescueTouchCd: 5`）：
+   タッチ救出・牢屋前の長押し救出の両方に適用。ボタンには残り秒数を出す（`5s` 表示）。
+5. **スパイ発覚後の拘束を 15秒 → 10秒**：`detainTime: 10`。HUD の `🔒 10秒拘束中`、
+   あそびかた、ja/en/ko/zh-Hans/zh-Hant の文言、`index.html` まで「10秒」に統一（15秒の表記は残っていない）。
+6. **お宝を戻すクールタイムを 36秒 → 5秒**：`returnCooldown: 5`（1個戻したら5秒後に次を戻せる）。
+   ボタンにはクールタイムの残り秒数を表示。
+   - 副作用の調整：5秒にすると CPU の潜入捜査官が約6.5秒ごとにお宝を戻し続け、自動対戦6シードで
+     **警察6勝・泥棒0勝（搬出合計2個）** になった。プレイヤーの5秒ルールはそのままに、
+     **AI は「あと1個で泥棒の勝ち」の土壇場だけ戻しに行く**ように変更（通常時は泥棒に紛れて動く）。
+     結果は警察3・泥棒3／搬出24個でバランスが戻っている（`test/build5.test.js` と
+      `test/core.test.js` の通し対戦で確認）。
+7. **Build 5 として配信**：`CURRENT_PROJECT_VERSION = 5`（2箇所）、`docs/ios-testflight-build5.yml`。
 
 ## Build 4 で入ったもの（21:53 の実機フィードバック＋追加承認ぶん）
 
@@ -46,6 +77,8 @@ Capacitor の iOS シェル（`ios/`）でそのままアプリになります�
 15. **Build 4 として配信**：`CURRENT_PROJECT_VERSION = 4`、`docs/ios-testflight-build4.yml`。
 
 ## Build 3 で入ったもの（実機フィードバック＋採用した提案）
+
+> ※ 以下の「15秒拘束」は Build 3 当時の値。**Build 5 で10秒に短縮**しています。
 
 1. **アプリアイコンを決定版に差し替え**：人狼警察（舌ペロでお宝）／黒マスクに警察バッジ＋無線＋手錠の
    人狼泥棒の絵（`assets/dorokei-appicon-1024.png` → `ios/App/App/Assets.xcassets/AppIcon.appiconset/`）。
@@ -124,9 +157,9 @@ PATH=/workspace/.tools/node22/bin:$PATH npm run serve   # http://127.0.0.1:8899/
 | 役 | 見た目 | 本当の陣営 | できること |
 |---|---|---|---|
 | 警察 COP | 紺のポリス服・制帽・赤青ランプ | 警察 | 泥棒に触れると確保（クールダウン4秒）。牢屋へ収容。茂みの近くで **🔍 捜索**。ボタン長押しでダッシュ |
-| 内通者 COP SPY | 警官のフリ | **泥棒** | 牢屋の前で1.5秒長押し＝解錠して脱獄させる。警官に7.5m以内で見られると正体発覚 |
+| 人狼警察 COP SPY | 警官のフリ | **泥棒** | 牢屋の前で1.5秒長押し＝解錠して脱獄させる。警官に7.5m以内で見られると **10秒拘束→警察へ寝返り** |
 | 泥棒 THIEF | ボーダー・目出し・赤ニット帽 | 泥棒 | お宝を回収→脱出ゲートへ。牢屋の前で1.5秒長押し＝仲間を救出。茂みに**最大5秒**隠れる |
-| 密告者 THIEF SPY | 泥棒のフリ | **警察** | ボタンで近く（11m以内）の泥棒を警察へ密告ピン。ゲート前で1.5秒長押し＝運ばれたお宝を隠し戻す。泥棒に見られると発覚 |
+| 潜入捜査官 THIEF SPY | 泥棒のフリ | **警察** | ゲート前で1.5秒長押し＝運ばれたお宝を戻す（**1個ごとに5秒**）。泥棒に見られると **10秒拘束→泥棒へ寝返り** |
 
 **勝利条件**
 
@@ -143,7 +176,8 @@ PATH=/workspace/.tools/node22/bin:$PATH npm run serve   # http://127.0.0.1:8899/
 - **捜索**：警察が茂みの**5.5m以内**にいるとボタンが「🔍 捜索」に光る。押すと足元から波紋が広がり、
   **4.5m以内**の隠れている泥棒を炙り出して確保。クールタイム1.6秒（CPU警官も捜索する）
 - **警察側スパイの解錠**：牢屋前で1.5秒。**他の警察に7.5m以内で見られると正体発覚**
-- **泥棒側スパイの奪い返し**：ゲート前で1.5秒。**他の泥棒に7.5m以内で見られると正体発覚**
+- **泥棒側スパイのお宝戻し**：ゲート前で1.5秒。**他の泥棒に7.5m以内で見られると正体発覚**。戻せるのは1個ごとに5秒後
+- **救出された側の制限**：助けられた泥棒は、自分の逃走から**5秒**たつまで次の仲間を助けられない
 - **正体発覚後**：元の陣営（内通者なら警察、密告者なら泥棒）からも捕まえて牢屋へ送れる
 - **スパイ自身は捕まえる側に回れない**（捜索も不可。正体を隠しているため）
 
@@ -175,6 +209,10 @@ PATH=/workspace/.tools/node22/bin:$PATH npm run serve   # http://127.0.0.1:8899/
 - BGM：138BPMの軽快なチェイスループ（Am–F–C–G、ベース＋アルペジオ＋ハイハット）
 - ゲームのイベント（`pickup` `deliver` `arrest` …）は `pickSfx()` で効果音名に変換され、
   勝利／敗北はプレイヤーの陣営で決まります。iOS はタップで `unlock()` してから鳴らします。
+- **Build 5: 止まった音の復帰**（`revive()` / `tick()` / `_rebuild()`）：`AudioContext` が
+  `suspended` / `interrupted` / `closed` になっても、フレームごとの見張りと操作・画面復帰の
+  イベントで `resume()` し、戻らない時は作り直します。鳴らせない間に押された効果音は、
+  復帰した直後に1回だけ鳴らします（古い操作音は2.5秒で捨てる）。
 
 ## 言語
 
@@ -204,8 +242,9 @@ www/
   src/main.js           UI配線・入力・設定の保存・モーダル・ゲームループ
 test/core.test.js       既存ルールのユニットテスト（26本）
 test/build2.test.js     Build 2のユニットテスト（14本：茂み5秒・捜索・ステージ・音・言語）
+test/build5.test.js     Build 5のユニットテスト（音の復帰・タグ拡大・救出後の振動バグ・5秒ルール・10秒拘束・ワークフロー）
 test/build4.test.js     Build 4のユニットテスト（人数・お宝数・移動・救出・アラート・スパイルール・文言・ワークフロー）
-test/build3.test.js     Build 3のユニットテスト（呼び名・15秒拘束→寝返り・牢屋/HUD・アイコン・ワークフロー）
+test/build3.test.js     Build 3のユニットテスト（呼び名・拘束→寝返り・牢屋/HUD・アイコン・ワークフロー）
 tools/serve.mjs         依存なし静的サーバー
 tools/shot.mjs          ヘッドレスChromiumでスクリーンショット撮影（タイトル・街・キャラ・隠れ・捜索）
 tools/interaction-test.mjs  ブラウザ操作の自動確認（モーダル・設定・隠れ・捜索・言語・リザルト）
@@ -214,15 +253,16 @@ tools/make-icons.mjs    旧アイコン/スプラッシュの生成（Build 2ま
 tools/set-app-icon.py   決定版アイコン（assets/dorokei-appicon-1024.png）をアセットカタログへ配置
 ios/                    Capacitor iOS プロジェクト（Xcode）
 docs/privacy.md         プライバシーポリシー本文
-docs/ios-testflight-build4.yml  Build 4 のワークフロー（Safariで .github/workflows/ へ上書きする用）
+docs/ios-testflight-build5.yml  Build 5 のワークフロー（Safariで .github/workflows/ へ上書きする用）
+docs/ios-testflight-build4.yml  Build 4 のワークフロー（履歴）
 docs/ios-testflight-build2.yml  Build 2 のワークフロー（履歴）
 ```
 
 ## テスト結果
 
-`npm test` → **56 / 56 pass**
-ブラウザ操作 `node tools/interaction-test.mjs` → **INTERACTION OK**（Build 3 の役カード・MENU・
-15秒拘束→寝返り・牢屋カメラ・縦横レイアウトも自動確認）
+`npm test` → **103 / 103 pass**
+ブラウザ操作 `node tools/interaction-test.mjs` → **INTERACTION OK**（役カード・MENU・10秒拘束→寝返り・
+牢屋カメラ・縦横レイアウト・Build 5 の音復帰／タグ拡大／救出後5秒／戻し5秒も自動確認）
 
 Build 2 で追加した確認（`test/build2.test.js`）:
 
@@ -267,7 +307,7 @@ CPU 8人の通し対戦（6シードで両陣営の勝ちが発生）・再現�
 |---|---|
 | Bundle ID | `jp.signlink.Dorokei` |
 | アプリ名 | `DOROKEI` |
-| バージョン | `1.0.0`（**Build 4**） |
+| バージョン | `1.0.0`（**Build 5**） |
 | 対応 | iOS 15.0 以上 / iPhone・iPad / 縦横対応 / ステータスバー非表示 |
 | 暗号化 | `ITSAppUsesNonExemptEncryption = false`（輸出コンプライアンスの質問をスキップ） |
 
@@ -276,19 +316,19 @@ npx cap sync ios     # www → ios/App/App/public を更新（要 Node 22）
 npx cap open ios     # Xcode で開く（Macのみ）
 ```
 
-### TestFlight 配信（Build 4）
+### TestFlight 配信（Build 5）
 
-Build 番号は `4` に更新済みですが、ワークフロー本体の `BUILD_NUMBER` も `4` にする必要があります。
+Build 番号は `5` に更新済みですが、ワークフロー本体の `BUILD_NUMBER` も `5` にする必要があります。
 GitHub連携の権限ではワークフローファイルを更新できないため、Build 1 と同じく Safari で貼り付けます。
 
-1. Safari で `docs/ios-testflight-build4.yml` を開き、全文をコピー
+1. Safari で `docs/ios-testflight-build5.yml` を開き、全文をコピー
 2. GitHub の `signlinkjp/dorokei-game` → `.github/workflows/ios-testflight-build1.yml` → 鉛筆（Edit）
    → 全文を置き換えて Commit
 3. Actions →「**DOROKEI iOS TestFlight**」→ Run workflow
    - `confirm_bundle_id` = `jp.signlink.Dorokei`
    - `upload_to_testflight` = **true**
 
-貼り付けるまでは、既存ワークフローの preflight が「`CURRENT_PROJECT_VERSION = 4`」と古い番号の
+貼り付けるまでは、既存ワークフローの preflight が「`CURRENT_PROJECT_VERSION = 5`」と古い番号の
 不一致で止まるので、古いビルド番号が TestFlight に出ることはありません。
 Apple 側の準備（Bundle ID・App Store Connect のアプリ・GitHub Secrets）は Build 1 で完了済みです。
 

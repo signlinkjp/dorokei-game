@@ -542,6 +542,138 @@ if (want('b4-spy')) {
   await page.close();
 }
 
+// ---- Build 5: 頭上の識別タグ（YOU / A〜J）の大きさ -------------------------
+if (want('b5-tags')) {
+  const page = await openPage(PHONE);
+  await page.goto(`${base}?demo=1&warp=4&hud=1`, { waitUntil: 'load' });
+  await page.waitForTimeout(1800);
+  const info = await page.evaluate(async () => {
+    const { startGame, world } = window.__dorokei;
+    startGame({ players: 8, playerRole: 'thief', playerSpy: 'never', spyMode: 'none', seed: 9, autoplay: true });
+    await new Promise((r) => setTimeout(r, 250));
+    window.__dorokei.freeze(true);
+    const g = window.__dorokei.game;
+    const p = g.player;
+    // 駅前の広場に、自分と仲間3人を並べる（タグの読みやすさを見る）
+    for (const a of g.agents) if (a !== p && a.state === 'free') { a.x = 74; a.z = 74; }
+    p.state = 'free';
+    p.x = -22;
+    p.z = 2;
+    p.dir = Math.PI;
+    const mates = g.agents.filter((a) => a.looks === 'thief' && a !== p && a.state === 'free').slice(0, 3);
+    const spots = [
+      [-25.5, 1],
+      [-18.6, 1],
+      [-22, 6],
+    ];
+    mates.forEach((m, i) => {
+      m.x = spots[i][0];
+      m.z = spots[i][1];
+      m.dir = Math.PI;
+    });
+    world.setView('follow');
+    world.snapCamera();
+    world.update(g, 1 / 60);
+    return {
+      tags: [...world.chars.values()].filter((c) => c.userData.tag.visible).map((c) => ({
+        text: c.userData.tagText,
+        w: +c.userData.tag.scale.x.toFixed(2),
+        h: +c.userData.tag.scale.y.toFixed(2),
+      })),
+    };
+  });
+  console.log('b5-tags:', JSON.stringify(info));
+  await shoot(page, 'dorokei-b5-tags.png', 400);
+  await page.close();
+}
+
+// ---- Build 5: 解錠で救出された泥棒（その場で震えない） ---------------------
+if (want('b5-rescue')) {
+  const page = await openPage({ width: 932, height: 430 });
+  await page.goto(`${base}?demo=1&warp=2&hud=1`, { waitUntil: 'load' });
+  await page.waitForTimeout(1800);
+  const info = await page.evaluate(async () => {
+    const { startGame, world } = window.__dorokei;
+    startGame({ players: 8, playerRole: 'cop', playerSpy: 'always', spyMode: 'both', seed: 4 });
+    await new Promise((r) => setTimeout(r, 250));
+    const g = window.__dorokei.game;
+    const spy = g.player;
+    const thieves = g.agents.filter((a) => a.role === 'thief');
+    for (const a of g.agents) if (a !== spy && a.state === 'free') { a.x = 60; a.z = 40; }
+    thieves.slice(0, 2).forEach((t, i) => {
+      t.state = 'jailed';
+      t.jailSlot = i;
+      t.jailedAt = 0;
+      t.x = -68 + i * 6;
+      t.z = 58;
+    });
+    spy.x = -62;
+    spy.z = 52.6;
+    g.setPlayerMove(0, 0);
+    g.setAction(true);
+    let freed = null;
+    for (let i = 0; i < 60 * 4 && !freed; i++) {
+      g.step(1 / 60);
+      freed = thieves.slice(0, 2).find((t) => t.state === 'free') || null;
+    }
+    g.setAction(false);
+    // 救出された泥棒が牢屋前から逃げていく瞬間を撮る
+    for (let i = 0; i < 60 * 1.2; i++) g.step(1 / 60);
+    window.__dorokei.freeze(true);
+    world.setView('follow');
+    world.snapCamera();
+    world.update(g, 1 / 60);
+    return {
+      freed: freed ? freed.name : null,
+      freedPos: freed ? [+freed.x.toFixed(1), +freed.z.toFixed(1)] : null,
+      touchCd: freed ? +freed.touchCd.toFixed(1) : null,
+      button: document.getElementById('actionBtn').textContent,
+    };
+  });
+  console.log('b5-rescue:', JSON.stringify(info));
+  await shoot(page, 'dorokei-b5-rescue.png', 400);
+  await page.close();
+}
+
+// ---- Build 5: 10秒拘束（役カードのバッジ） --------------------------------
+if (want('b5-detain')) {
+  const page = await openPage({ width: 932, height: 430 });
+  await page.goto(
+    `${base}?demo=1&team=thief&self=always&spy=thieves&seed=5&warp=6&hud=1&jail=1&detain=2`,
+    { waitUntil: 'load' },
+  );
+  await page.waitForTimeout(2400);
+  const info = await page.evaluate(() => {
+    const { game, world } = window.__dorokei;
+    world.centerJailView();
+    world.panLookBy(30, 10);
+    game.stepSeconds(0.5);
+    return {
+      detainLeft: +game.player.detainLeft.toFixed(1),
+      tag: document.getElementById('roleTag').textContent,
+      mission: document.getElementById('roleText').textContent,
+    };
+  });
+  console.log('b5-detain:', JSON.stringify(info));
+  await shoot(page, 'dorokei-b5-detain.png', 300);
+  await page.close();
+}
+
+// ---- Build 5: あそびかた（救出と戻しの5秒ルール） -------------------------
+if (want('b5-howto')) {
+  const page = await openPage(PHONE);
+  await page.goto(`${base}`, { waitUntil: 'load' });
+  await page.waitForTimeout(1600);
+  const info = await page.evaluate(() => {
+    window.__dorokei.openModal('howto');
+    const items = [...document.querySelectorAll('.panel.active .howto-list li')].map((li) => li.textContent.trim());
+    return { items };
+  });
+  console.log('b5-howto:', JSON.stringify(info).slice(0, 900));
+  await shoot(page, 'dorokei-b5-howto.png', 500);
+  await page.close();
+}
+
 const errors = logs.filter((l) => /\[error\]|pageerror/i.test(l));
 console.log('console errors:', errors.length ? errors.join('\n') : '(none)');
 if (logs.length > errors.length) console.log('warnings:', logs.length - errors.length);

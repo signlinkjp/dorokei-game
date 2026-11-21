@@ -91,20 +91,21 @@ export const CFG = Object.freeze({
   freeImmunity: 2.0,
   exposeRange: 7.5,
   exposeAfter: 0.15,
-  detainTime: 15, // スパイ発覚後の拘束秒数（Build 3・トモアキさん指定）
+  detainTime: 10, // スパイ発覚後の拘束秒数（Build 5: 15 → 10 に短縮・トモアキさん指定）
   copVision: 11, // Build 4: 運搬中の泥棒を見つける距離
   thiefDodge: 9.0,
   unlockCooldown: 5.0,
   hideReveal: 3.2, // 隠れている泥棒が見つかる距離
   hideRange: 1.2, // 茂みに隠れられる距離（中心から+半径）
   hideMax: 5, // 1回の隠れは最大5秒（トモアキさん指定）
+  hideKeepRange: 7.0, // Build 5: 隠れたまま待つのは警官がこの距離にいる間だけ
   hideCooldown: 3, // 解除後3秒は隠れ直せない（同）
   searchRange: 5.5, // 警察が「捜索」できる茂みまでの距離
   searchRadius: 4.5, // 捜索の波紋が届き、隠れている泥棒を炙り出す距離
   searchCooldown: 1.6, // 連打しすぎないための短いクールタイム
   durations: [180, 300, 420], // 設定で選べる制限時間（3分/5分/7分）
   returnRange: 5.0, // 脱出ゲート前でお宝を隠し戻せる距離
-  returnCooldown: 36, // Build 4: お宝を戻したあと、次の戻し作業までの間隔（連発で封殺しない）
+  returnCooldown: 5, // Build 5: お宝を戻したあと、次の戻し作業までの間隔（トモアキさん指定で36 → 5秒）
   bushDodge: 4.5, // 泥棒が茂みへ逃げ込む距離
   // ---- Build 4 ----
   touchRescueRange: 1.6, // 捕まっていない泥棒が牢屋の仲間にタッチして救出できる距離
@@ -118,6 +119,9 @@ export const CFG = Object.freeze({
   rescueImmunity: 2.5, // 救出された泥棒が再確保されない秒数（トモアキさん指定）
   rescueBoost: 1.2, // 救出直後のちょい加速
   rescueBoostTime: 1.5, // 加速が続く秒数
+  rescueTouchCd: 5, // Build 5: 救出された側が次に仲間を助けられるのは逃走から5秒後（トモアキさん指定）
+  fleeHold: 1.4, // Build 5: 一度逃げ始めたらこの秒数は逃げ続ける（境目での振動を止める）
+  fleeRelease: 3.0, // Build 5: 逃げ続ける間は警官をこの距離まで警戒する（4.5 + 3.0 = 7.5m）
   spyAlertRange: 14, // 相手陣営がこの距離に入ったら「⚠ 接近！」を出す（発覚距離7.5より手前）
   // ---- Build 4: 参加人数 ----
   playerOptions: [4, 5, 6, 7, 8, 9, 10], // 設定で選べる参加人数（最大10名）
@@ -736,12 +740,13 @@ export class Game {
         detour: null, // 引っかかった時に一時的に向かう回り込み地点
         escapeT: 0, // 救出直後の逃走ブースト
         jailedAt: 0, // 牢屋に入った時刻（Build 4: 先に捕まった順の救出のため）
-        touchCd: 0, // タッチ救出の連鎖防止
+        touchCd: 0, // タッチ救出の連鎖防止（Build 5: 救出された側は5秒）
         ai: {
           wp: Math.floor(this.rng() * 8),
           retarget: 0,
           hideFor: 0,
           hideCd: 0,
+          fleeT: 0, // Build 5: 逃げ続ける残り秒数（警官との境目での振動防止）
           returnCd: 0, // お宝を戻したあとのクールタイム（潜入捜査官）
           spyGoal: 'roam', // 人狼警察の狙い（unlock / cover / roam）
           spyHold: 0, // その狙いを持ち続ける残り秒数
@@ -1003,6 +1008,17 @@ export class Game {
     target.actionT = 0;
     target.hidden = false;
     target.path = null;
+    // Build 5: 牢屋に入る前の経路・回り込み・引っかかり・隠れ予定を持ち越さない
+    // （持ち越すと、出た直後に古い目標へ歩いたり、その場で震えたりする）
+    target.pathTarget = null;
+    target.pathAge = 0;
+    target.detour = null;
+    target.stuckT = 0;
+    target.ai.hideFor = 0;
+    target.ai.fleeT = 0;
+    // Build 5: 助けられた側の泥棒は、自分の逃走から5秒たつまで次の仲間を助けられない
+    // （タッチ救出も牢屋前の長押し救出も同じクールタイムで止める）
+    target.touchCd = Math.max(target.touchCd || 0, this.cfg.rescueTouchCd);
     target.x = MAP.jailDoor.x + (this.rng() - 0.5) * 2;
     target.z = MAP.jailDoor.z - 1.8;
     if (cause === 'touch') {
@@ -1094,6 +1110,13 @@ export class Game {
     agent.whistleCd = 0;
     agent.unlockCd = 0;
     agent.path = null;
+    // Build 5: 拘束前の経路・回り込み・引っかかりを持ち越さない
+    agent.pathTarget = null;
+    agent.pathAge = 0;
+    agent.detour = null;
+    agent.stuckT = 0;
+    agent.ai.hideFor = 0;
+    agent.ai.fleeT = 0;
     agent.x = MAP.jailDoor.x + (this.rng() - 0.5) * 2;
     agent.z = MAP.jailDoor.z - 1.8;
     this.stats.defections++;
@@ -1471,7 +1494,7 @@ export class Game {
           a.unlockCd = this.cfg.unlockCooldown;
           this.freeOne('unlock', a);
         }
-      } else if (a.role === ROLE.THIEF) {
+      } else if (a.role === ROLE.THIEF && a.touchCd <= 0) {
         acting = true;
         a.actionT += dt;
         if (a.actionT >= this.cfg.actionTime) {
@@ -1804,6 +1827,7 @@ export class Game {
       o.state === 'free' && this.canArrest(a, o) && this.canSee(a, o);
     let target = null;
     let act = false;
+    let hidNow = false; // Build 5: このフレームで隠れたら、その場で動かず隠れる
 
     if (a.role === ROLE.COP) {
       const seen = this.nearest(a, hostile, this.cfg.copVision);
@@ -1858,18 +1882,26 @@ export class Game {
       // 隠れている間は警察が離れるまで待つ
       if (a.hidden) {
         a.ai.hideFor -= dt;
+        // Build 5: 隠れて待つのは警官が近い時だけ（遠くの警官に怯えて
+        // 茂みにこもり続けると、泥棒が全然お宝を運べなくなる）
         const near = this.nearest(
           a,
-          (o) => o.looks === 'cop' && o.state === 'free' && dist(a, o) < 13,
-          13,
+          (o) => o.looks === 'cop' && o.state === 'free' && dist(a, o) < this.cfg.hideKeepRange,
+          this.cfg.hideKeepRange,
         );
         if (near.agent && a.ai.hideFor > 0) return { mx: 0, mz: 0, act: false };
         this.unhide(a);
       }
+      // Build 5: 一度逃げ始めたら少し遠くまで警戒して逃げ続ける。
+      // 境目（4.5m）で「逃げる↔お宝へ向かう」が1フレームごとに入れ替わると、
+      // 救出された泥棒がその場で左右に震えて固まる（トモアキさん報告のバグ）。
+      a.ai.fleeT = Math.max(0, (a.ai.fleeT || 0) - dt);
+      const fleeing = a.ai.fleeT > 0;
+      const fleeRange = this.cfg.thiefDodge + (fleeing ? this.cfg.fleeRelease : 0);
       const copNear = this.nearest(
         a,
         (o) => o.looks === 'cop' && o.state === 'free' && !o.exposed && this.canSee(o, a),
-        this.cfg.thiefDodge,
+        fleeRange,
       );
       const jailedList = this.agents.filter((o) => o.team === 'thief' && o.state === 'jailed');
       const jailed = jailedList.length;
@@ -1884,14 +1916,17 @@ export class Game {
       if (a.carrying != null) {
         target = MAP.gate;
         act = false;
-      } else if (!a.hidden && copNear.agent && copNear.dist < this.cfg.bushDodge && a.ai.hideCd <= 0) {
-        // 追われたら茂みへ飛び込む
+      } else if (!a.hidden && a.ai.hideCd <= 0 && copNear.agent && (fleeing || copNear.dist < this.cfg.bushDodge)) {
+        // 追われたら茂みへ飛び込む。Build 5: 一度逃げ始めたら fleeHold 秒は
+        // 距離に関係なく逃げ続ける（距離の境目だけで判断すると振動する）
+        if (copNear.dist < this.cfg.bushDodge) a.ai.fleeT = this.cfg.fleeHold;
         const b = this.bushAt(a, 9);
         if (b >= 0) {
           const bush = MAP.bushes[b];
           target = bush;
           if (Math.hypot(bush.x - a.x, bush.z - a.z) < bush.r && this.hide(a)) {
             a.ai.hideFor = Math.min(this.cfg.hideMax - 1.2, 2.2 + this.rng() * 1.6);
+            hidNow = true;
           }
         } else {
           target = this.fleePoint(a, copNear.agent);
@@ -1930,9 +1965,14 @@ export class Game {
       }
     } else if (a.role === ROLE.THIEF_SPY) {
       // 潜入捜査官: 運ばれたお宝をゲートから戻すのが仕事（Build 4）
+      // Build 5: 戻しのクールタイムが5秒になり、AI が毎回戻すと泥棒が絶対に勝てなくなった
+      // （6試合連続で警察勝利・搬出2個→5秒化の検証結果）。だから AI は
+      // 「あと1個で泥棒の勝ち」の土壇場だけ戻しに行き、それ以外は泥棒に紛れて動く。
+      // プレイヤーが操作する時の5秒ルールはそのまま。
       const thieves = this.agents.filter((o) => o !== a && o.role === ROLE.THIEF && o.state === 'free');
       const copNear = this.nearest(a, (o) => o.looks === 'cop' && o.state === 'free', 6);
-      if (this.securedCount > 0) {
+      const lastStretch = this.securedCount >= this.cfg.treasureRequired - 1;
+      if (this.securedCount > 0 && lastStretch) {
         target = MAP.gate;
         // 泥棒に見られていない時だけ作業する（見られたら15秒拘束→寝返り）
         const watched = this.nearest(
@@ -1957,6 +1997,7 @@ export class Game {
           target = bush;
           if (Math.hypot(bush.x - a.x, bush.z - a.z) < bush.r && this.hide(a)) {
             a.ai.hideFor = Math.min(this.cfg.hideMax - 1.2, 2 + this.rng() * 1.4);
+            hidNow = true;
           }
         } else {
           target = { x: a.x + (a.x - copNear.agent.x) * 2, z: a.z + (a.z - copNear.agent.z) * 2 };
@@ -1964,6 +2005,9 @@ export class Game {
       }
     }
 
+    // Build 5: 隠れたそのフレームに動くと即 unhide されて「茂みでガクガク」するので、
+    // 隠れた瞬間は足を止める（相手の前で隠れる演出も自然になる）
+    if (hidNow) return { mx: 0, mz: 0, act: false };
     let mv = this.moveToward(a, target, dt);
     let dx = mv.mx;
     let dz = mv.mz;

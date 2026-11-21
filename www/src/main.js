@@ -141,6 +141,21 @@ function saveSettings() {
 
 const audio = new AudioEngine({ enabled: settings.sound !== false });
 
+// ---- Build 5: 音が止まったまま戻らないバグの対策 -------------------------
+// iOS は電話・Siri・画面収録・バックグラウンド復帰で AudioContext が
+// suspended / interrupted のまま固まり、resume() を呼ばない限り二度と鳴らない。
+// 操作のたび・前面に戻った時に必ず起こし、フレームごとに見張る。
+const wakeAudio = () => audio.revive();
+document.addEventListener('pointerdown', wakeAudio, { capture: true, passive: true });
+document.addEventListener('touchend', wakeAudio, { capture: true, passive: true });
+document.addEventListener('keydown', wakeAudio, { capture: true, passive: true });
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) wakeAudio();
+});
+window.addEventListener('pageshow', wakeAudio);
+window.addEventListener('focus', wakeAudio);
+window.addEventListener('resize', wakeAudio, { passive: true });
+
 let game = null;
 let mode = 'title'; // title | playing | ended
 let shownEvents = 0;
@@ -704,14 +719,28 @@ function actionLabel(p) {
   }
   if (p.role === ROLE.THIEF_SPY) {
     // Build 4: 旧アクションは廃止。ゲートに運ばれたお宝を戻すのが仕事。
-    if (nearGate && game.securedCount > 0) return { text: 'お宝を戻す\n長押し', cls: 'spy' };
+    // Build 5: 戻したあと5秒はクールタイム（残り秒数をボタンに出す）
+    if (nearGate && game.securedCount > 0) {
+      return p.ai.returnCd > 0
+        ? { text: `${Math.ceil(p.ai.returnCd)}s`, cls: 'cooldown' }
+        : { text: 'お宝を戻す\n長押し', cls: 'spy' };
+    }
     if (game.securedCount > 0) return { text: 'お宝を戻しに', cls: 'spy' };
     return { text: '待機', cls: 'spy' };
   }
   if (p.carrying != null) return { text: 'にげろ', cls: '' };
   // Build 4: 牢屋の仲間に触れれば、その場でタッチ救出できる
-  if (game.nearJailedMate(p)) return { text: 'タッチ救出!', cls: 'hidden-mode' };
-  if (nearDoor && jailedCount > 0) return { text: '救出\n長押し', cls: '' };
+  // Build 5: 助けられた直後は5秒間、次の仲間を助けられない
+  if (game.nearJailedMate(p)) {
+    return p.touchCd > 0
+      ? { text: `${Math.ceil(p.touchCd)}s`, cls: 'cooldown' }
+      : { text: 'タッチ救出!', cls: 'hidden-mode' };
+  }
+  if (nearDoor && jailedCount > 0) {
+    // Build 5: 助けられた側は、逃走から5秒たつまで次の仲間を助けられない
+    if (p.touchCd > 0) return { text: `${Math.ceil(p.touchCd)}s`, cls: 'cooldown' };
+    return { text: '救出\n長押し', cls: '' };
+  }
   if (p.hidden) return { text: '出る', cls: 'hidden-mode' };
   if (game.bushAt(p) >= 0) {
     return p.hideCd > 0
@@ -883,6 +912,8 @@ function frame(now) {
       }
       game.step(dt);
     }
+    // Build 5: BGM の予約と、止まった音の復帰（毎フレームの見張り）
+    audio.tick(now);
     world.update(game, dt);
     minimap.draw(game);
     updateHud(dt);

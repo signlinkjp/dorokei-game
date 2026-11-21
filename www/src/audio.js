@@ -82,11 +82,30 @@ export class AudioEngine {
     this._stepIndex = 0;
     this._nextNoteTime = 0;
     this._last = new Map();
+    // ---- Build 5: 「音が止まったまま戻らない」の対策用の状態 ----
+    this._deferredSfx = null; // 復帰した瞬間に1回だけ鳴らす効果音
+    this._deferredAt = 0;
+    this._reviveTries = 0; // 続けて復帰を試した回数
+    this._lastRevive = 0;
+    this._lastRebuild = 0;
+    this._stuckSince = 0;
+  }
+
+  _now() {
+    return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+  }
+
+  /** いま音を出せる状態か（'running' 以外は鳴らない） */
+  running() {
+    return !!this.ctx && this.ctx.state === 'running';
   }
 
   /** AudioContext を必要になった時だけ作る（iOS の自動再生制限つき） */
   ensureCtx() {
     if (!this.available) return null;
+    // Build 5: 一度閉じた（closed）コンテキストには二度と音が乗らない。
+    // iOS では画面収録・電話・長時間のバックグラウンドで閉じることがあるので作り直す。
+    if (this.ctx && this.ctx.state === 'closed') this._dropCtx();
     if (this.ctx) return this.ctx;
     try {
       const Ctor = window.AudioContext || window.webkitAudioContext;
@@ -118,19 +137,125 @@ export class AudioEngine {
     }
   }
 
+  /**
+   * Build 5: コンテキストを捨てて作り直す準備。
+   * 閉じた／壊れた AudioContext を持ち続けると、以後ずっと無音になる。
+   */
+  _dropCtx() {
+    this._stopScheduler();
+    try {
+      this.ctx?.close?.();
+    } catch {
+      /* すでに閉じている・close できない環境 */
+    }
+    this.ctx = null;
+    this.master = null;
+    this.sfxBus = null;
+    this.musicBus = null;
+    this.noiseBuf = null;
+  }
+
+  /** 止まっている AudioContext に resume() を投げる（Promise の失敗は無視） */
+  _resumeCtx(ctx = this.ctx) {
+    if (!ctx || ctx.state === 'running' || ctx.state === 'closed') return false;
+    try {
+      const p = ctx.resume?.();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch {
+      /* resume できない環境はそのまま */
+    }
+    return ctx.state === 'running';
+  }
+
+  /** Build 5: AudioContext ごと作り直し、BGM の予約も引き継ぐ */
+  _rebuild() {
+    this._dropCtx();
+    const ctx = this.ensureCtx();
+    if (ctx && ctx.state !== 'running') this._resumeCtx(ctx);
+    if (this._musicWanted && this.enabled) this._startScheduler();
+    return ctx;
+  }
+
+  /**
+   * Build 5: 「いま鳴らせる状態」へ戻す。
+   * iOS は電話・Siri・画面収録・バックグラウンド復帰などで state が
+   * suspended / interrupted のまま固まり、resume() を呼ばない限り二度と鳴らない。
+   * （これが「2回目のプレイで無音」の直接の原因だった）
+   */
+  revive(now = this._now()) {
+    if (!this.available) return false;
+    const ctx = this.ensureCtx();
+    if (!ctx) return false;
+    if (ctx.state === 'running' || this._resumeCtx(ctx)) {
+      this._reviveTries = 0;
+      this._stuckSince = 0;
+      this._flushDeferredSfx();
+      return true;
+    }
+    // interrupted のまま何度も戻らない時に、作り直す判断をするための時計
+    if (!this._stuckSince) this._stuckSince = now;
+    return false;
+  }
+
+  /** 復帰の直前に押された操作の音を、鳴らせるようになった1回だけ取り戻す */
+  _flushDeferredSfx() {
+    const name = this._deferredSfx;
+    if (!name) return;
+    this._deferredSfx = null;
+    // ずっと前の操作音は鳴らさない（復帰時に古い音が不意に出るのを防ぐ）
+    if (this._now() - (this._deferredAt || 0) > 2500) return;
+    this.play(name);
+  }
+
+  /**
+   * Build 5: 毎フレーム呼ぶ見張り役。
+   *  - BGM の予約をここでも進める（setInterval が間引かれても鳴り続ける）
+   *  - suspended / interrupted のままなら定期的に resume を試す
+   *  - それでも戻らなければ AudioContext を作り直す
+   */
+  tick(now = this._now()) {
+    if (!this.available) return;
+    if (typeof document !== 'undefined' && document.hidden) return;
+    const ctx = this.ensureCtx();
+    if (!ctx) return;
+    if (ctx.state === 'running') {
+      this._reviveTries = 0;
+      this._stuckSince = 0;
+      this._flushDeferredSfx();
+      if (this._musicWanted && this.enabled) {
+        this._startScheduler();
+        this._schedule();
+      }
+      return;
+    }
+    if (now - this._lastRevive < 800) return;
+    this._lastRevive = now;
+    this._reviveTries += 1;
+    if (this.revive(now)) return;
+    if (this._reviveTries >= 3 && now - this._lastRebuild > 5000) {
+      this._lastRebuild = now;
+      this._reviveTries = 0;
+      this._rebuild();
+    }
+  }
+
   /** 最初のタップで呼ぶ。iOS で音を出すための解錠。 */
   unlock() {
     const ctx = this.ensureCtx();
     if (!ctx) return false;
-    if (ctx.state === 'suspended') ctx.resume?.();
+    this.revive();
     return true;
   }
 
   setEnabled(on) {
     this.enabled = !!on;
     if (this.master) this.master.gain.value = this.enabled ? this.volume : 0;
-    if (this.enabled && this._musicWanted) this._startScheduler();
-    else if (!this.enabled) this._stopScheduler();
+    if (this.enabled) {
+      this.revive();
+      if (this._musicWanted) this._startScheduler();
+    } else {
+      this._stopScheduler();
+    }
   }
 
   // ---- 合成の基本パーツ -------------------------------------------------
@@ -189,7 +314,16 @@ export class AudioEngine {
     if (!this.enabled) return false;
     const ctx = this.ensureCtx();
     if (!ctx || !this.sfxBus) return false;
-    if (ctx.state === 'suspended') ctx.resume?.();
+    if (ctx.state !== 'running') {
+      // 止まっている間は音を積まない（復帰した瞬間にまとめて鳴るのを防ぐ）。
+      // 代わりに resume を試し、だめなら復帰後に1回だけ鳴らす。
+      this._resumeCtx(ctx);
+      if (ctx.state !== 'running') {
+        this._deferredSfx = name;
+        this._deferredAt = this._now();
+        return false;
+      }
+    }
     const now = ctx.currentTime;
     const last = this._last.get(name) ?? -1;
     if (now - last < 0.035) return false;
@@ -287,6 +421,7 @@ export class AudioEngine {
     this._musicWanted = true;
     if (!this.enabled) return;
     this.ensureCtx();
+    this.revive();
     this._startScheduler();
   }
 
@@ -299,6 +434,8 @@ export class AudioEngine {
     if (!this.available || this._musicTimer) return;
     if (!this.ctx) return;
     this._nextNoteTime = this.ctx.currentTime + 0.06;
+    // Build 5: setInterval だけに頼ると、iOS がタイマーを間引いた時に
+    // 予定が過去に取り残されて BGM が止まる。フレーム側の tick() でも進める。
     this._musicTimer = setInterval(() => this._schedule(), 80);
     this._schedule();
   }
@@ -318,6 +455,8 @@ export class AudioEngine {
       this._nextNoteTime = ctx.currentTime + 0.06;
       return;
     }
+    // 止まっていた間に予定が過去へ取り残されていたら、いまに合わせる（音の塊を防ぐ）
+    if (this._nextNoteTime < ctx.currentTime - 0.25) this._nextNoteTime = ctx.currentTime + 0.06;
     const eighth = 60 / 138 / 2;
     let guard = 0;
     while (this._nextNoteTime < ctx.currentTime + 0.28 && guard++ < 32) {

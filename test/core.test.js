@@ -288,7 +288,7 @@ test('お宝を持った泥棒を捕まえると、お宝は街のどこかへ�
   assert.ok(Math.hypot(tr.x - MAP.jail.x, tr.z - MAP.jail.z) > 20);
 });
 
-test('正体発覚していない内通者は警官に捕まえられず、発覚すると牢屋で15秒拘束→警察へ寝返る（Build 3）', () => {
+test('正体発覚していない内通者は警官に捕まえられず、発覚すると牢屋で10秒拘束→警察へ寝返る（Build 3/5）', () => {
   const g = makeGame({ playerRole: 'cop', playerSpy: 'always' });
   const spy = g.player;
   assert.equal(spy.role, ROLE.COP_SPY);
@@ -297,13 +297,13 @@ test('正体発覚していない内通者は警官に捕まえられず、発�
   assert.equal(g.canArrest(cop, spy), false);
   assert.equal(g.arrest(cop, spy), false);
   g.expose(spy);
-  // 即逮捕ではなく牢屋へ移送して15秒の拘束
+  // 即逮捕ではなく牢屋へ移送して10秒の拘束
   assert.equal(spy.state, 'detained');
-  assert.equal(spy.detainLeft, 15);
+  assert.equal(spy.detainLeft, 10);
   cop.arrestCd = 0;
   assert.equal(g.canArrest(cop, spy), false, '拘束中は確保できない');
-  // 15秒後は見た目どおりの警察へ強制転向
-  g.stepSeconds(14.5);
+  // 10秒後は見た目どおりの警察へ強制転向
+  g.stepSeconds(9.5);
   assert.equal(spy.state, 'detained');
   g.stepSeconds(1.0);
   assert.equal(spy.state, 'free');
@@ -392,7 +392,7 @@ test('内通者は牢屋前で1.5秒長押しすると解錠でき、警官に�
   assert.ok(jailed.z < MAP.jailDoor.z);
 });
 
-test('解錠中を他の警官に近くで見られると正体発覚し、解錠は中断されて15秒後に警察へ寝返る（Build 3）', () => {
+test('解錠中を他の警官に近くで見られると正体発覚し、解錠は中断されて10秒後に警察へ寝返る（Build 3/5）', () => {
   const g = makeGame({ playerRole: 'cop', playerSpy: 'always' });
   const spy = g.player;
   const jailed = jailThief(g);
@@ -414,7 +414,7 @@ test('解錠中を他の警官に近くで見られると正体発覚し、解�
   assert.equal(jailed.state, 'jailed', '発覚したら解錠は中断される');
   g.stepSeconds(14);
   assert.equal(spy.state, 'free');
-  assert.equal(spy.role, ROLE.COP, '15秒後に警察へ寝返る');
+  assert.equal(spy.role, ROLE.COP, '10秒後に警察へ寝返る');
 });
 
 // ---- 泥棒側スパイ（潜入捜査官）のお宝戻し -------------------------------
@@ -443,7 +443,7 @@ test('潜入捜査官は脱出ゲート前の長押しで、運ばれたお宝�
   assert.ok(Math.hypot(swiped.x - MAP.gate.x, swiped.z - MAP.gate.z) > 20);
 });
 
-test('お宝の隠し戻し中を他の泥棒に見られると正体発覚し、15秒後に泥棒になる（Build 3）', () => {
+test('お宝の隠し戻し中を他の泥棒に見られると正体発覚し、10秒後に泥棒になる（Build 3/5）', () => {
   const g = makeGame({ playerRole: 'thief', playerSpy: 'always' });
   const spy = g.player;
   g.treasures[0].state = 'secured';
@@ -466,7 +466,7 @@ test('お宝の隠し戻し中を他の泥棒に見られると正体発覚し�
   assert.equal(spy.team, 'cop', '拘束中は元の陣営のまま');
   g.stepSeconds(15);
   assert.equal(spy.state, 'free');
-  assert.equal(spy.role, ROLE.THIEF, '15秒後に泥棒へ寝返る');
+  assert.equal(spy.role, ROLE.THIEF, '10秒後に泥棒へ寝返る');
   assert.equal(spy.team, 'thief');
   assert.equal(g.stats.defections, 1);
 });
