@@ -786,13 +786,15 @@ export class World {
     hood.position.set(jail.x, 4.5, door.z);
     this.scene.add(hood);
 
-    const sign = new THREE.Sprite(makeLabel('POLICE', '#ffffff', 'rgba(28,74,160,0.96)', 68));
-    sign.scale.set(9, 4.5, 1);
-    sign.position.set(jail.x, 6.6, door.z - 1.4);
+    // 入口の看板は牢屋の中を隠さないよう、小さめ＆高い位置に（Build 4）
+    const sign = new THREE.Sprite(makeLabel('POLICE', '#ffffff', 'rgba(28,74,160,0.92)', 68));
+    sign.scale.set(5.4, 2.7, 1);
+    sign.position.set(jail.x, 8.4, door.z - 1.4);
+    sign.material.opacity = 0.92;
     this.scene.add(sign);
     const jailSign = new THREE.Sprite(makeLabel('JAIL', '#1b3f8f', 'rgba(255,255,255,0.95)', 74));
-    jailSign.scale.set(4.6, 2.3, 1);
-    jailSign.position.set(jail.x, 3.0, jail.z - 7.9);
+    jailSign.scale.set(3.4, 1.7, 1);
+    jailSign.position.set(jail.x, 2.4, jail.z - 7.9);
     this.scene.add(jailSign);
 
     // ---- 遠くからでも一目で分かる牢屋の目印（Build 4） ----
