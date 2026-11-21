@@ -621,7 +621,7 @@ test('プレイ中に「⚠ 接近！」アラートの枠がある', () => {
 // ---- ビルド番号・ワークフロー --------------------------------------------
 test('Build 4 のワークフロー定義（1行目が # で始まり、BUILD_NUMBER と preflight が4）', () => {
   const yml = read('docs/ios-testflight-build4.yml');
-  assert.equal(yml.split('\n')[0].startsWith('# '), true, '1行目は必ず YAML コメント');
+  assert.equal(yml.split('\n')[0], '# DOROKEI iOS TestFlight Build 4', '1行目はビルド名のコメント');
   assert.match(yml, /BUILD_NUMBER: "4"/);
   assert.match(yml, /CURRENT_PROJECT_VERSION = 4;/);
   assert.ok(!/CURRENT_PROJECT_VERSION = 3;/.test(yml));
