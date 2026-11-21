@@ -1,6 +1,6 @@
 // DOROKEI 3D renderer — 明るいポップな街・キャラ・牢屋・お宝・脱出ゲート
 import * as THREE from '../vendor/three.module.js';
-import { MAP, ROLE, looksLike } from './core.js';
+import { MAP, ROLE, looksLike, JAIL_SLOTS } from './core.js';
 
 const COL = {
   copBody: 0x2a55b8, // 紺に近い深い青のポリスユニフォーム
@@ -97,6 +97,75 @@ function glowTexture(inner = 'rgba(255,240,180,0.95)', outer = 'rgba(255,200,60,
   return tex;
 }
 
+/** 背中の POLICE ロゴ（制服のワッペン風） */
+function policePatchTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 96;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, 256, 96);
+  g.fillStyle = 'rgba(12,22,46,0.92)';
+  const r = 14;
+  g.beginPath();
+  g.moveTo(r, 4);
+  g.lineTo(256 - r, 4);
+  g.quadraticCurveTo(252, 4, 252, 4 + r);
+  g.lineTo(252, 92 - r);
+  g.quadraticCurveTo(252, 92, 252 - r, 92);
+  g.lineTo(r, 92);
+  g.quadraticCurveTo(4, 92, 4, 92 - r);
+  g.lineTo(4, 4 + r);
+  g.quadraticCurveTo(4, 4, 4 + r, 4);
+  g.fill();
+  g.strokeStyle = 'rgba(255,214,90,0.9)';
+  g.lineWidth = 5;
+  g.stroke();
+  g.fillStyle = '#ffffff';
+  g.font = 'bold 52px "Liberation Sans", "Helvetica Neue", system-ui, sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText('POLICE', 128, 50);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+/**
+ * キャラの識別タグ（Build 4）。
+ * 頭上に「YOU」または A/B/C… を極小で出し、寝返りで見た目が変わっても
+ * 「誰が誰か」を見失わないようにする。文字色は現在の見た目（警官=青／泥棒=橙）。
+ */
+function tagTexture(text, color = '#ffffff', ring = 'rgba(12,22,46,0.72)') {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 128;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, 256, 128);
+  g.fillStyle = ring;
+  g.beginPath();
+  const r = 40;
+  g.moveTo(r, 8);
+  g.lineTo(256 - r, 8);
+  g.quadraticCurveTo(248, 8, 248, 8 + r);
+  g.lineTo(248, 120 - r);
+  g.quadraticCurveTo(248, 120, 248 - r, 120);
+  g.lineTo(r, 120);
+  g.quadraticCurveTo(8, 120, 8, 120 - r);
+  g.lineTo(8, 8 + r);
+  g.quadraticCurveTo(8, 8, 8 + r, 8);
+  g.fill();
+  g.fillStyle = color;
+  g.font = `bold ${text.length > 1 ? 62 : 78}px "Liberation Sans", "Helvetica Neue", system-ui, sans-serif`;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(text, 128, 68);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
 /** グループ内のマテリアルを重複なく集める（隠れ中の半透明化に使う） */
 function collectMats(group) {
   const set = new Set();
@@ -105,6 +174,54 @@ function collectMats(group) {
     for (const m of Array.isArray(o.material) ? o.material : [o.material]) set.add(m);
   });
   return [...set];
+}
+
+const TAG_TEX = new Map();
+
+/** 線分と矩形（XZ）の重なり区間 t0..t1 を返す（Liang–Barsky） */
+function segmentRectRange(ax, az, bx, bz, cx, cz, hw, hd) {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = bx - ax;
+  const dz = bz - az;
+  const p = [-dx, dx, -dz, dz];
+  const q = [ax - (cx - hw), cx + hw - ax, az - (cz - hd), cz + hd - az];
+  for (let i = 0; i < 4; i++) {
+    if (Math.abs(p[i]) < 1e-9) {
+      if (q[i] < 0) return null;
+      continue;
+    }
+    const r = q[i] / p[i];
+    if (p[i] < 0) {
+      if (r > t1) return null;
+      if (r > t0) t0 = r;
+    } else {
+      if (r < t0) return null;
+      if (r < t1) t1 = r;
+    }
+  }
+  return t1 > t0 ? [t0, t1] : null;
+}
+
+/** 名前の末尾の英字（ポリスA → A）を識別タグにする */
+function tagLetter(name) {
+  const m = /([A-Z])$/.exec(name || '');
+  return m ? m[1] : (name || '?').slice(0, 1);
+}
+
+/** 識別タグのテクスチャ（色は今の見た目の陣営） */
+function tagTexFor(text, look, isPlayer) {
+  const key = `${text}|${look}|${isPlayer ? 1 : 0}`;
+  if (TAG_TEX.has(key)) return TAG_TEX.get(key);
+  const ring = isPlayer
+    ? 'rgba(196,138,0,0.92)'
+    : look === 'cop'
+      ? 'rgba(20,48,104,0.82)'
+      : 'rgba(94,44,10,0.82)';
+  const color = isPlayer ? '#fff6cf' : '#ffffff';
+  const tex = tagTexture(text, color, ring);
+  TAG_TEX.set(key, tex);
+  return tex;
 }
 
 const ROOF_TINT = {
@@ -217,6 +334,10 @@ export class World {
     this.buildTrees();
     this.buildBushes();
     this.buildProps();
+    this.buildCarryGuide();
+
+    this.camLift = 0;
+    this.occluded = 0;
 
     this.resize();
     window.addEventListener('resize', () => this.resize());
@@ -386,6 +507,8 @@ export class World {
 
   buildBuildings() {
     const windowMats = [];
+    // Build 4: カメラとプレイヤーの間を遮る高い建物を透かすため、建物ごとに覚えておく
+    this.buildings = [];
     for (const o of MAP.obstacles) {
       if (o.kind === 'car') continue;
       const mat = new THREE.MeshLambertMaterial({ color: o.color });
@@ -398,6 +521,15 @@ export class World {
       const roof = new THREE.Mesh(new THREE.BoxGeometry(o.w + 0.8, 0.55, o.d + 0.8), roofMat);
       roof.position.set(o.x, o.h + 0.27, o.z);
       this.scene.add(roof);
+      this.buildings.push({
+        x: o.x,
+        z: o.z,
+        hw: o.w / 2 + 0.4,
+        hd: o.d / 2 + 0.4,
+        h: o.h + 0.6,
+        mats: [mat, roofMat],
+        fade: 1,
+      });
 
       // 屋上の小物（ポップなアクセント）
       if (o.kind !== 'pavilion' && o.h > 4) {
@@ -572,14 +704,24 @@ export class World {
       this.scene.add(stripe);
     }
 
-    // ---- 屋根（中央が吹き抜けの「口」の字）で警察署の建物らしく ----
-    const roofMat = new THREE.MeshLambertMaterial({ color: 0x3b5f9e });
-    const roofEdge = new THREE.MeshLambertMaterial({ color: 0x27406f });
-    const ring = 2.4;
-    const roofY = 4.35;
+    // ---- 屋根（Build 4: 中央を大きく吹き抜けにし、手前側は屋根を外して中を見通せるように） ----
+    const roofMat = new THREE.MeshLambertMaterial({
+      color: 0x3b5f9e,
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+    });
+    const roofEdge = new THREE.MeshLambertMaterial({
+      color: 0x27406f,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+    });
+    this.jailRoofMats = [roofMat, roofEdge];
+    const ring = 1.0;
+    const roofY = 4.5;
     const pieces = [
       { x: jail.x, z: jail.z + jail.d / 2 - ring / 2, w: jail.w + 1.6, d: ring },
-      { x: jail.x, z: jail.z - jail.d / 2 + ring / 2, w: jail.w + 1.6, d: ring },
       { x: jail.x - jail.w / 2 + ring / 2, z: jail.z, w: ring, d: jail.d + 1.6 - ring * 2 },
       { x: jail.x + jail.w / 2 - ring / 2, z: jail.z, w: ring, d: jail.d + 1.6 - ring * 2 },
     ];
@@ -616,7 +758,7 @@ export class World {
     const inst = new THREE.InstancedMesh(barGeo, barMat, bars.length);
     const m = new THREE.Matrix4();
     bars.forEach((b, i) => {
-      m.makeTranslation(b.x, 3.95, b.z);
+      m.makeTranslation(b.x, 2.55, b.z);
       inst.setMatrixAt(i, m);
     });
     inst.instanceMatrix.needsUpdate = true;
@@ -653,6 +795,40 @@ export class World {
     jailSign.position.set(jail.x, 3.0, jail.z - 7.9);
     this.scene.add(jailSign);
 
+    // ---- 遠くからでも一目で分かる牢屋の目印（Build 4） ----
+    // 光の柱（スポットライト）＋宙に浮かぶ JAIL バッジで、街のどこからでも位置が分かる
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(5.0, 7.2, 30, 22, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: 0x9ecbff,
+        transparent: true,
+        opacity: 0.13,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    beam.position.set(jail.x, 15, jail.z);
+    this.scene.add(beam);
+    this.jailBeam = beam;
+
+    const badge = new THREE.Sprite(makeLabel('JAIL', '#0f2f66', 'rgba(224,240,255,0.97)', 78));
+    badge.scale.set(7.4, 3.7, 1);
+    badge.position.set(jail.x, 9.6, jail.z);
+    this.scene.add(badge);
+    this.jailBadge = badge;
+    const badgeGlow = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: glowTexture('rgba(150,205,255,0.85)', 'rgba(120,180,255,0)'),
+        transparent: true,
+        depthWrite: false,
+        opacity: 0.7,
+      }),
+    );
+    badgeGlow.scale.set(13, 13, 1);
+    badgeGlow.position.set(jail.x, 9.6, jail.z);
+    this.scene.add(badgeGlow);
+    this.jailBadgeGlow = badgeGlow;
+
     // ---- 投光照明（四隅）で牢屋の中を明るく ----
     const poleMat = new THREE.MeshLambertMaterial({ color: 0x8f9db3 });
     for (const [dx, dz] of [
@@ -683,17 +859,11 @@ export class World {
       this.scene.add(pole, head, halo);
     }
 
-    // ---- 牢屋の中のベンチ（収容された泥棒の目印） ----
+    // ---- 牢屋の中のベンチ（収容された泥棒の目印。人数分のスロットに合わせる） ----
     const benchMat = new THREE.MeshLambertMaterial({ color: 0xb98a5c });
-    for (const s of [
-      { x: -68, z: 58 },
-      { x: -62, z: 58 },
-      { x: -56, z: 58 },
-      { x: -68, z: 65 },
-      { x: -62, z: 65 },
-      { x: -56, z: 65 },
-    ]) {
-      const seat = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.18, 0.7), benchMat);
+    const seatGeo = new THREE.BoxGeometry(2.4, 0.18, 0.7);
+    for (const s of JAIL_SLOTS) {
+      const seat = new THREE.Mesh(seatGeo, benchMat);
       seat.position.set(s.x, 0.55, s.z);
       this.scene.add(seat);
     }
@@ -740,10 +910,69 @@ export class World {
     this.gateRing.position.set(g.x, 2.9, g.z);
     this.scene.add(this.gateRing);
 
+    // ---- 上空からの光の柱（Build 4: 遠くからでもゲートと分かる） ----
+    const pillar = new THREE.Mesh(
+      new THREE.CylinderGeometry(g.w * 0.44, g.w * 0.62, 34, 24, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: 0xa8ffcf,
+        transparent: true,
+        opacity: 0.2,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    pillar.position.set(g.x, 17, g.z);
+    this.scene.add(pillar);
+    this.gatePillar = pillar;
+
+    // 宙に浮かぶゲートのしるし（回転するリング＋金のひし形）
+    const beacon = new THREE.Group();
+    const diamond = new THREE.Mesh(
+      new THREE.OctahedronGeometry(1.5),
+      new THREE.MeshBasicMaterial({ color: 0xffe066 }),
+    );
+    const halo = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: glowTexture('rgba(190,255,215,0.9)', 'rgba(120,255,180,0)'),
+        transparent: true,
+        depthWrite: false,
+        opacity: 0.8,
+      }),
+    );
+    halo.scale.set(11, 11, 1);
+    const beaconRing = new THREE.Mesh(
+      new THREE.TorusGeometry(2.6, 0.12, 8, 32),
+      new THREE.MeshBasicMaterial({ color: 0xd9ffe9 }),
+    );
+    beaconRing.rotation.x = Math.PI / 2;
+    beacon.add(diamond, halo, beaconRing);
+    beacon.position.set(g.x, 11.5, g.z);
+    this.scene.add(beacon);
+    this.gateBeacon = beacon;
+    this.gateBeaconRing = beaconRing;
+
     const sign = new THREE.Sprite(makeLabel('EXIT', '#d6ffe8', 'rgba(20,110,70,0.95)', 72));
-    sign.scale.set(7, 3.5, 1);
-    sign.position.set(g.x, 7.6, g.z);
+    sign.scale.set(8.4, 4.2, 1);
+    sign.position.set(g.x, 7.9, g.z);
     this.scene.add(sign);
+    const sign2 = new THREE.Sprite(makeLabel('LOOT → EXIT', '#0c3d27', 'rgba(200,255,225,0.95)', 54));
+    sign2.scale.set(6.6, 3.3, 1);
+    sign2.position.set(g.x, 4.2, g.z - 3.2);
+    this.scene.add(sign2);
+
+    // ゲートへ向かう地面の矢印（近づいてきた時の道しるべ）
+    const chevronMat = new THREE.MeshBasicMaterial({ color: 0xffe066, transparent: true, opacity: 0.85 });
+    this.gateChevrons = [];
+    for (let i = 0; i < 4; i++) {
+      const chev = new THREE.Mesh(new THREE.ConeGeometry(1.05, 1.7, 3), chevronMat);
+      chev.rotation.x = Math.PI / 2;
+      chev.rotation.z = Math.PI;
+      chev.position.set(g.x, 0.12, g.z - 10 - i * 4.2);
+      chev.scale.set(1, 0.35, 1);
+      this.scene.add(chev);
+      this.gateChevrons.push(chev);
+    }
 
     // ゴールドの地面サークル
     const ring = new THREE.Mesh(
@@ -784,6 +1013,79 @@ export class World {
       mesh.instanceMatrix.needsUpdate = true;
       this.scene.add(mesh);
     });
+  }
+
+  /** Build 4: お宝を運んでいる間、足元にゲート方向を指すガイド矢印 */
+  buildCarryGuide() {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffe066 });
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.8, 4), mat);
+    head.rotation.x = Math.PI / 2; // コーンの先を +z（進む向き）へ
+    head.position.set(0, 0.1, 0.42);
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.7), mat);
+    tail.position.set(0, 0.1, -0.16);
+    const glow = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: glowTexture('rgba(255,240,160,0.9)', 'rgba(255,200,60,0)'),
+        transparent: true,
+        depthWrite: false,
+        opacity: 0.7,
+      }),
+    );
+    glow.scale.set(1.9, 1.9, 1);
+    g.add(head, tail, glow);
+    g.visible = false;
+    this.scene.add(g);
+    this.carryGuide = g;
+  }
+
+  /**
+   * Build 4: カメラとプレイヤーの間に入った高い建物を半透明にする（オクルージョン透過）。
+   * ビルの裏に入っても自キャラを見失わない。
+   */
+  updateOcclusion(player) {
+    if (!player || !this.buildings) return;
+    const cam = this.camera.position;
+    const dx = player.x - cam.x;
+    const dy = 1.0 - cam.y;
+    const dz = player.z - cam.z;
+    const segLen = Math.hypot(dx, dz) || 1;
+    const pad = 0.9 / segLen;
+    let any = 0;
+    for (const b of this.buildings) {
+      let block = false;
+      const r = segmentRectRange(cam.x, cam.z, player.x, player.z, b.x, b.z, b.hw, b.hd);
+      if (r) {
+        const t0 = Math.max(0, r[0] + pad);
+        const t1 = Math.min(1, r[1] - pad);
+        if (t1 > t0) block = cam.y + dy * t1 < b.h;
+      }
+      if (block) any++;
+      const want = block ? 0.3 : 1;
+      b.fade += (want - b.fade) * 0.16;
+      if (Math.abs(b.fade - want) < 0.004) b.fade = want;
+      for (const m of b.mats) {
+        const trans = b.fade < 0.995;
+        if (m.transparent !== trans) {
+          m.transparent = trans;
+          m.needsUpdate = true;
+        }
+        m.opacity = b.fade;
+        m.depthWrite = !trans;
+      }
+    }
+    this.occluded = any;
+
+    // 高い建物のそばでは、カメラを少し高い位置へ上げる（見下ろして建物を越す）
+    let near = 0;
+    for (const b of this.buildings) {
+      const ddx = Math.max(Math.abs(player.x - b.x) - b.hw, 0);
+      const ddz = Math.max(Math.abs(player.z - b.z) - b.hd, 0);
+      if (Math.hypot(ddx, ddz) < 6.5) near = Math.max(near, b.h);
+    }
+    const wantLift = near > 8 ? 5 : 0;
+    this.camLift += (wantLift - this.camLift) * 0.12;
+    if (Math.abs(this.camLift - wantLift) < 0.02) this.camLift = wantLift;
   }
 
   buildBushes() {
@@ -1017,6 +1319,16 @@ export class World {
       capBadge.position.set(0, 1.755, 0.25);
       g.add(capCrown, capTop, capBand, visor, capBadge);
 
+      // Build 4: 背中に「POLICE」のロゴ（上から見ても警官だと分かる）
+      const backPatch = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.46, 0.17),
+        new THREE.MeshBasicMaterial({ map: policePatchTexture(), transparent: true }),
+      );
+      backPatch.position.set(0, 1.08, -0.187);
+      backPatch.rotation.y = Math.PI;
+      g.add(backPatch);
+      parts.backPatch = backPatch;
+
       // パトランプ（赤・青）— 常に点滅
       const lampR = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), flat(COL.red));
       lampR.position.set(-0.11, 1.915, 0);
@@ -1096,6 +1408,23 @@ export class World {
     carry.visible = false;
     g.add(carry);
 
+    // ---- Build 4: 頭上の識別タグ（自分は YOU、仲間は A / B / C …） ----
+    // 極小サイズで視認を邪魔せず、拘束→寝返りで服の色が変わっても同じ文字で追える。
+    const tagText = a.isPlayer ? 'YOU' : tagLetter(a.name);
+    const tag = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: tagTexFor(tagText, isCop ? 'cop' : 'thief', a.isPlayer),
+        transparent: true,
+        depthWrite: false,
+        // 自分のタグだけは建物越しでも見えるようにする（自分を見失わない）
+        depthTest: !a.isPlayer,
+      }),
+    );
+    tag.scale.set(a.isPlayer ? 0.94 : 0.54, a.isPlayer ? 0.47 : 0.27, 1);
+    tag.position.set(0, a.isPlayer ? 2.16 : 2.04, 0);
+    tag.renderOrder = 6;
+    g.add(tag);
+
     // 足元の影
     const shadow = new THREE.Mesh(
       new THREE.CircleGeometry(0.5, 18),
@@ -1103,6 +1432,21 @@ export class World {
     );
     shadow.rotation.x = -Math.PI / 2;
     shadow.position.y = 0.07;
+
+    // Build 4: 救出直後の保護リング（2.5秒の無敵＋ちょい加速の目印）
+    const rescueRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.74, 0.09, 8, 26),
+      new THREE.MeshBasicMaterial({
+        color: 0x8fffc0,
+        transparent: true,
+        opacity: 0.9,
+        depthWrite: false,
+      }),
+    );
+    rescueRing.rotation.x = -Math.PI / 2;
+    rescueRing.position.y = 0.15;
+    rescueRing.visible = false;
+    g.add(rescueRing);
 
     // 正体発覚マーク
     const alert = new THREE.Sprite(makeLabel('!', '#ffffff', 'rgba(214,40,40,0.96)', 120));
@@ -1116,6 +1460,9 @@ export class World {
       parts,
       carry,
       alert,
+      tag,
+      tagText,
+      rescueRing,
       look: isCop ? 'cop' : 'thief',
       mats: collectMats(g),
     };
@@ -1228,6 +1575,27 @@ export class World {
         if (halo?.material) halo.material.opacity = 0.62 + Math.sin(this.t * 6 + a.id) * 0.22;
       }
       g.userData.alert.visible = !!a.exposed;
+      // 救出直後の保護リング（無敵＋加速中）
+      const rr = g.userData.rescueRing;
+      if (rr) {
+        const boosted = a.state === 'free' && (a.escapeT > 0 || a.immune > 0.2);
+        rr.visible = boosted;
+        if (boosted) {
+          const k = Math.min(1, a.escapeT / Math.max(0.001, game.cfg.rescueBoostTime || 1.5));
+          rr.scale.setScalar(1 + (1 - k) * 0.4);
+          rr.material.opacity = 0.3 + 0.6 * k;
+          rr.position.y = 0.15 + Math.sin(this.t * 8 + a.id) * 0.03;
+        }
+      }
+      // 寝返りで見た目の陣営が変わったら、識別タグの色も合わせる
+      if (g.userData.look !== a.looks) {
+        g.userData.look = a.looks;
+        const tg = g.userData.tag;
+        if (tg) {
+          tg.material.map = tagTexFor(g.userData.tagText, a.looks, a.isPlayer);
+          tg.material.needsUpdate = true;
+        }
+      }
       g.scale.setScalar(jailed ? 0.92 : 1);
 
       // 隠れている泥棒は、近くに来ないと見えない（プレイヤー自身は半透明）
@@ -1267,7 +1635,7 @@ export class World {
       }
     }
 
-    // 密告ピン
+    // 位置ピン（Build 4 以降はこのピンは使わないので通常は空）
     while (this.pingMeshes.length < game.pings.length) {
       const p = new THREE.Group();
       const cone = new THREE.Mesh(
@@ -1365,6 +1733,48 @@ export class World {
       this.gateRing.rotation.z += dt * 0.8;
       this.gateGlow.material.opacity = 0.26 + Math.sin(this.t * 2.4) * 0.09;
     }
+    if (this.gatePillar) {
+      this.gatePillar.material.opacity = 0.15 + Math.sin(this.t * 1.5) * 0.05;
+      this.gatePillar.rotation.y += dt * 0.15;
+    }
+    if (this.gateBeacon) {
+      this.gateBeacon.position.y = 11.5 + Math.sin(this.t * 1.8) * 0.6;
+      this.gateBeacon.rotation.y += dt * 1.1;
+      this.gateBeacon.children[0].rotation.y += dt * 1.6;
+      this.gateBeaconRing.rotation.z += dt * 0.9;
+    }
+    if (this.gateChevrons) {
+      this.gateChevrons.forEach((c, i) => {
+        c.material.opacity = 0.5 + Math.sin(this.t * 3 - i * 0.9) * 0.35;
+      });
+    }
+    if (this.jailBadge) {
+      this.jailBadge.position.y = 9.6 + Math.sin(this.t * 1.4) * 0.45;
+      if (this.jailBadgeGlow) this.jailBadgeGlow.position.y = this.jailBadge.position.y;
+      if (this.jailBeam) this.jailBeam.material.opacity = 0.09 + Math.sin(this.t * 1.2) * 0.03;
+    }
+
+    // Build 4: お宝を運んでいる間、足元にゲート方向のガイド矢印
+    if (player && this.carryGuide) {
+      const show = player.carrying != null && player.state === 'free' && this.view !== 'map';
+      this.carryGuide.visible = show;
+      if (show) {
+        const gx = MAP.gate.x - player.x;
+        const gz = MAP.gate.z - player.z;
+        const d = Math.hypot(gx, gz) || 1;
+        const ahead = Math.min(2.4, Math.max(1.3, d * 0.32));
+        this.carryGuide.position.set(
+          player.x + (gx / d) * ahead,
+          0.42 + Math.sin(this.t * 6) * 0.07,
+          player.z + (gz / d) * ahead,
+        );
+        this.carryGuide.rotation.y = Math.atan2(gx, gz);
+        this.carryGuide.scale.setScalar(0.92 + Math.sin(this.t * 6) * 0.07);
+      }
+    }
+
+    // Build 4: 建物の遮りを透かす（ビルの裏でも自キャラを見失わない）
+    this.updateOcclusion(player);
 
     // カメラ
     this.updateCamera(player, dt);
@@ -1414,7 +1824,7 @@ export class World {
       : overview
         ? new THREE.Vector3(0, 0, 14)
         : new THREE.Vector3(player.x, 0, player.z + 2);
-    let offset = new THREE.Vector3(0, 25, 22);
+    let offset = new THREE.Vector3(0, 25 + (this.camLift || 0), 22);
     if (this.view === 'top') offset = new THREE.Vector3(0, 70, 13);
     if (overview) {
       const tilt = this.overviewTilt ?? 0.42;

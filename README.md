@@ -1,13 +1,49 @@
-# DOROKEI — ドロケー × 人狼（Build 3：決定版アイコン・警察署の中の牢屋・15秒拘束→寝返り・HUD整理）
+# DOROKEI — ドロケー × 人狼（Build 4：人数選択4〜10人・タッチ救出・ビル透過・コピー抑止）
 
 警官と泥棒の鬼ごっこ（ドロケー）に、人狼の「スパイ」を混ぜた 3D アクション。
 HTML/CSS/JS + Three.js（CDN 不使用・`www/vendor/three.module.js` に同梱）だけで動き、
 Capacitor の iOS シェル（`ios/`）でそのままアプリになります。ビルド工程はありません。
 
-- プレイヤー1人 + CPU 8人（警察3 対 泥棒5、各陣営にスパイ0〜1）
+- プレイヤー1人 + CPU（**4〜10人**から選択。既定は8人＝警察3 対 泥棒5、各陣営にスパイ0〜1）
 - **150m × 150m** の広い街（銀行・宝石店・美術館・公園・駅・商店街・駐車場・路地・警察署）
 - 右上に **ミニマップ（レーダー）**、左下バーチャルスティック、右下の文脈アクションボタン
-- お宝は **10箇所の候補から5個** をランダム配置（捕まった時・奪い返された時は別の場所へ隠し戻し）
+- お宝は **10箇所の候補から人数に応じて3〜5個** をランダム配置（捕まった時・戻された時は別の場所へ隠し戻し）
+
+## Build 4 で入ったもの（21:53 の実機フィードバック＋追加承認ぶん）
+
+1. **スパイと思われる警察の動きを修正**：人狼警察が警官の近くで「牢屋↔持ち場」を毎フレーム往復して
+   ガクついていた。狙いを数秒単位で決め直すヒステリシス（`spyHold`）＋警官から離れた持ち場
+   （`coverPoint`）へ変更し、90秒あたりの往復を 1/4 以下に。
+2. **キャラが建物角・柵で引っかかる問題を修正**：壁沿いスライド（`moveWithSlide`）、目標が壁の中なら
+   外へ読み替える `freeTarget`、引っかかった時の回り込み `detourPoint`、キャラ同士の重なり防止
+   （`separateAgents`）。自動プレイの「進めていない時間」を 548秒 → 数秒/4分に削減。
+3. **キャラの表記**：警官の背中に **POLICE** ロゴ、頭上に極小の **YOU / B / C …** タグ
+   （寝返りで服の色が変わっても同じ字で追える。色は今の見た目の陣営）。
+4. **iOS のコピー・長押し選択を完全無効化**：`-webkit-user-select` / `-webkit-touch-callout` /
+   `contextmenu` / `selectstart` / `dblclick` / `dragstart` を抑止（入力欄だけ例外）。
+5. **高いビルの裏でも見失わない**：カメラとプレイヤーの間の建物を半透明（オクルージョン透過）＋
+   高い建物のそばではカメラを少し上げる（`camLift`）。
+6. **タッチ救出**：捕まっていない泥棒が牢屋の仲間にタッチすると2人とも逃走（既存の長押し解錠・救出も維持、
+   15秒拘束中のスパイは対象外）。助ける相手は **①直接タッチした相手 → ②プレイヤー（YOU）→ ③先に捕まった順**。
+7. **救出直後の保護**：救出された泥棒（と助けた側）は **2.5秒つかまらず、1.2倍のちょい加速**＋緑のリング演出。
+8. **スパイ作業中の接近アラート**：人狼警察の解錠中／潜入捜査官のお宝戻し中に、相手陣営が14m以内へ
+   近づくと **「⚠ 接近! ◯m」**（発覚7.5mより手前で警告、9.9m以内は赤く強調）。
+9. **牢屋の見通しと目印**：屋根を細いリングに＋手前側は撤去、壁は1.7mに低く、宙に浮かぶ **JAIL** バッジと
+   光の柱。ミニマップにも **JAIL / EXIT** の点滅サイン。
+10. **脱出ゲートを分かりやすく**：光の柱・回転する金のビーコン・「LOOT → EXIT」看板・地面の矢印、
+    さらに**お宝を運んでいると足元にゲート方向のガイド矢印**（`carryGuide`）。
+11. **参加人数を選べる（4〜10人）**：タイトルで人数を選ぶと警察・泥棒の内訳を自動配分
+    （4人=1/3、6人=2/4、8人=3/5、10人=4/6。警察1以上・泥棒2以上）。
+    スポーン位置・牢屋スロット（8枠）・識別タグ（10人分）・HUD・AI まで10人で破綻しないことをテスト。
+12. **人数に応じたお宝数**：4〜5人=3個、6〜7人=4個、8〜10人=5個（HUD・勝利条件・ルール説明も連動）。
+13. **スパイルールの修正（重要）**：
+    - **潜入捜査官（泥棒の見た目・本当は警察）は警察の通常逮捕対象外**（接触しても牢屋に入らない）。
+    - 発覚は **作業を見られた時だけ**：人狼警察＝牢屋の解錠中、潜入捜査官＝ゲートのお宝戻し中。
+    - **「密告／密告ピン」を廃止**し、潜入捜査官の仕事を **「お宝を戻す」** に統一（UI・ボタン・ログ・あそびかた）。
+    - お宝戻しは **36秒のクールタイム**（連発で封殺しない）。
+14. **バランス再調整**：新しい救出・お宝戻し・引っかかり修正で警官が強くなりすぎたため、
+    視界 17→11m、ダッシュ 1.3→1.16、確保クール 4→5.5秒、運搬速度 5.4→6.2 に調整。
+15. **Build 4 として配信**：`CURRENT_PROJECT_VERSION = 4`、`docs/ios-testflight-build4.yml`。
 
 ## Build 3 で入ったもの（実機フィードバック＋採用した提案）
 
@@ -168,7 +204,8 @@ www/
   src/main.js           UI配線・入力・設定の保存・モーダル・ゲームループ
 test/core.test.js       既存ルールのユニットテスト（26本）
 test/build2.test.js     Build 2のユニットテスト（14本：茂み5秒・捜索・ステージ・音・言語）
-test/build3.test.js     Build 3のユニットテスト（16本：呼び名・15秒拘束→寝返り・牢屋/HUD・アイコン・ワークフロー）
+test/build4.test.js     Build 4のユニットテスト（人数・お宝数・移動・救出・アラート・スパイルール・文言・ワークフロー）
+test/build3.test.js     Build 3のユニットテスト（呼び名・15秒拘束→寝返り・牢屋/HUD・アイコン・ワークフロー）
 tools/serve.mjs         依存なし静的サーバー
 tools/shot.mjs          ヘッドレスChromiumでスクリーンショット撮影（タイトル・街・キャラ・隠れ・捜索）
 tools/interaction-test.mjs  ブラウザ操作の自動確認（モーダル・設定・隠れ・捜索・言語・リザルト）
@@ -177,7 +214,7 @@ tools/make-icons.mjs    旧アイコン/スプラッシュの生成（Build 2ま
 tools/set-app-icon.py   決定版アイコン（assets/dorokei-appicon-1024.png）をアセットカタログへ配置
 ios/                    Capacitor iOS プロジェクト（Xcode）
 docs/privacy.md         プライバシーポリシー本文
-docs/ios-testflight-build3.yml  Build 3 のワークフロー（Safariで .github/workflows/ へ上書きする用）
+docs/ios-testflight-build4.yml  Build 4 のワークフロー（Safariで .github/workflows/ へ上書きする用）
 docs/ios-testflight-build2.yml  Build 2 のワークフロー（履歴）
 ```
 
@@ -230,7 +267,7 @@ CPU 8人の通し対戦（6シードで両陣営の勝ちが発生）・再現�
 |---|---|
 | Bundle ID | `jp.signlink.Dorokei` |
 | アプリ名 | `DOROKEI` |
-| バージョン | `1.0.0`（**Build 3**） |
+| バージョン | `1.0.0`（**Build 4**） |
 | 対応 | iOS 15.0 以上 / iPhone・iPad / 縦横対応 / ステータスバー非表示 |
 | 暗号化 | `ITSAppUsesNonExemptEncryption = false`（輸出コンプライアンスの質問をスキップ） |
 
@@ -239,19 +276,19 @@ npx cap sync ios     # www → ios/App/App/public を更新（要 Node 22）
 npx cap open ios     # Xcode で開く（Macのみ）
 ```
 
-### TestFlight 配信（Build 3）
+### TestFlight 配信（Build 4）
 
-Build 番号は `3` に更新済みですが、ワークフロー本体の `BUILD_NUMBER` も `3` にする必要があります。
+Build 番号は `4` に更新済みですが、ワークフロー本体の `BUILD_NUMBER` も `4` にする必要があります。
 GitHub連携の権限ではワークフローファイルを更新できないため、Build 1 と同じく Safari で貼り付けます。
 
-1. Safari で `docs/ios-testflight-build3.yml` を開き、全文をコピー
+1. Safari で `docs/ios-testflight-build4.yml` を開き、全文をコピー
 2. GitHub の `signlinkjp/dorokei-game` → `.github/workflows/ios-testflight-build1.yml` → 鉛筆（Edit）
    → 全文を置き換えて Commit
 3. Actions →「**DOROKEI iOS TestFlight**」→ Run workflow
    - `confirm_bundle_id` = `jp.signlink.Dorokei`
    - `upload_to_testflight` = **true**
 
-貼り付けるまでは、既存ワークフローの preflight が「`CURRENT_PROJECT_VERSION = 3`」と「= 2」の
+貼り付けるまでは、既存ワークフローの preflight が「`CURRENT_PROJECT_VERSION = 4`」と古い番号の
 不一致で止まるので、古いビルド番号が TestFlight に出ることはありません。
 Apple 側の準備（Bundle ID・App Store Connect のアプリ・GitHub Secrets）は Build 1 で完了済みです。
 

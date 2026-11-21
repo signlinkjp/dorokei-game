@@ -6,7 +6,8 @@
 //  - 泥棒はお宝を規定数（=配置数5）すべて盗んで脱出ゲートへ運べば勝ち。隠れる・盗む・運ぶ・救出が可能。
 //  - お宝を運んでいる間は移動速度が落ちる（6.8 → 5.4）。
 //  - お宝を持ったまま捕まると、泥棒は牢屋へ・お宝は街のどこかへランダムに隠し戻される。
-//  - 警察側スパイ（内通者）は牢屋を解錠できる。泥棒側スパイ（密告者）は運ばれたお宝を隠し戻せる。
+//  - 警察側スパイ（人狼警察）は牢屋を解錠できる。泥棒側スパイ（潜入捜査官）はゲートに運ばれたお宝を戻せる。
+//  - Build 4: 潜入捜査官は警察の通常逮捕対象外。発覚は「解錠の作業」「お宝を戻す作業」を見られた時だけ。
 //  - 解錠中を他の警察に、お宝の隠し戻し中を他の泥棒に近くで見られると正体発覚。
 //    発覚後は元の陣営からも捕まえて牢屋へ送れる。
 //  - Build 2: 茂みに隠れられるのは1回 最大5秒（解除後3秒のクールタイム）とし、
@@ -76,11 +77,11 @@ export const CFG = Object.freeze({
   treasureCount: 5, // 配置するお宝の数
   treasureRequired: 5, // 泥棒が全部運ばないと勝てない（=1つでも守れば警察の勝ち）
   treasureSpots: 10, // お宝候補スポット数
-  speed: { cop: 6.4, thief: 6.8, carry: 5.4 }, // 運搬中は 6.8 → 5.4
-  copDash: 1.3,
+  speed: { cop: 6.3, thief: 6.9, carry: 6.2 }, // 運搬中は遅くなる（Build 4 で再調整）
+  copDash: 1.16, // Build 4: 追跡が強すぎて運搬が全部つかまっていたので緩めた
   radius: 0.62,
   arrestRange: 1.9,
-  arrestCooldown: 4.0,
+  arrestCooldown: 5.5,
   pickupRange: 2.0,
   actionRange: 2.9,
   actionTime: 1.5,
@@ -91,8 +92,8 @@ export const CFG = Object.freeze({
   exposeRange: 7.5,
   exposeAfter: 0.15,
   detainTime: 15, // スパイ発覚後の拘束秒数（Build 3・トモアキさん指定）
-  copVision: 17,
-  thiefDodge: 7.0,
+  copVision: 11, // Build 4: 運搬中の泥棒を見つける距離
+  thiefDodge: 9.0,
   unlockCooldown: 5.0,
   hideReveal: 3.2, // 隠れている泥棒が見つかる距離
   hideRange: 1.2, // 茂みに隠れられる距離（中心から+半径）
@@ -103,8 +104,58 @@ export const CFG = Object.freeze({
   searchCooldown: 1.6, // 連打しすぎないための短いクールタイム
   durations: [180, 300, 420], // 設定で選べる制限時間（3分/5分/7分）
   returnRange: 5.0, // 脱出ゲート前でお宝を隠し戻せる距離
+  returnCooldown: 36, // Build 4: お宝を戻したあと、次の戻し作業までの間隔（連発で封殺しない）
   bushDodge: 4.5, // 泥棒が茂みへ逃げ込む距離
+  // ---- Build 4 ----
+  touchRescueRange: 1.6, // 捕まっていない泥棒が牢屋の仲間にタッチして救出できる距離
+  touchRescueCd: 1.4, // タッチ救出の連鎖を防ぐクールタイム（誤作動防止）
+  stuckAfter: 0.35, // この秒数ぶん進めていなければ「引っかかった」とみなして回り込む
+  detourTime: 1.0, // 回り込みを続ける秒数
+  spyClearRange: 9.0, // 人狼警察が牢屋へ向かうのは、この距離に警官がいない時だけ
+  spyAbortRange: 6.5, // 解錠中にこの距離まで警官が来たら、あきらめて持ち場へ戻る
+  spyHoldMin: 5.5, // 人狼警察が同じ狙いを持ち続ける最短秒数（往復の振動を防ぐ）
+  // ---- Build 4: 救出直後の保護と、スパイ作業中の接近アラート ----
+  rescueImmunity: 2.5, // 救出された泥棒が再確保されない秒数（トモアキさん指定）
+  rescueBoost: 1.2, // 救出直後のちょい加速
+  rescueBoostTime: 1.5, // 加速が続く秒数
+  spyAlertRange: 14, // 相手陣営がこの距離に入ったら「⚠ 接近！」を出す（発覚距離7.5より手前）
+  // ---- Build 4: 参加人数 ----
+  playerOptions: [4, 5, 6, 7, 8, 9, 10], // 設定で選べる参加人数（最大10名）
+  minPlayers: 4,
+  maxPlayers: 10,
+  players: 8, // 既定（警察3・泥棒5）
 });
+
+/**
+ * 参加人数から警察・泥棒の内訳を決める（Build 4）。
+ * 警察は必ず1人以上、泥棒は必ず2人以上になるようにしてある。
+ *   10人 → 警察4・泥棒6
+ */
+export function splitTeams(total = 8) {
+  const table = {
+    4: [1, 3],
+    5: [2, 3],
+    6: [2, 4],
+    7: [3, 4],
+    8: [3, 5],
+    9: [4, 5],
+    10: [4, 6],
+  };
+  const n = Math.min(10, Math.max(4, Math.round(Number(total) || 8)));
+  const [cops, thieves] = table[n] || table[8];
+  return { cops, thieves, total: cops + thieves };
+}
+
+/**
+ * 参加人数に合わせたお宝の数（Build 4）。泥棒はこの数を全部運べば勝ち。
+ *   4人 → 3個 / 6人 → 4個 / 8〜10人 → 5個
+ */
+export function treasureCountFor(total = 8) {
+  const n = Math.min(10, Math.max(4, Math.round(Number(total) || 8)));
+  if (n <= 5) return 3;
+  if (n <= 7) return 4;
+  return 5;
+}
 
 // ---- 街のデータ ----------------------------------------------------------
 const B = { minX: -75, maxX: 75, minZ: -75, maxZ: 75 };
@@ -168,11 +219,11 @@ const OBSTACLES = [
 const JAIL = { x: -62, z: 62, w: 20, d: 16 };const JAIL_DOOR = { x: -62, z: 53.6 };
 
 const JAIL_WALLS = [
-  { x: -72.4, z: 62, w: 0.8, d: 16.8, h: 2.2 },
-  { x: -51.6, z: 62, w: 0.8, d: 16.8, h: 2.2 },
-  { x: -62, z: 70.4, w: 21.6, d: 0.8, h: 2.2 },
-  { x: -68.5, z: 53.6, w: 7.5, d: 0.8, h: 2.2 },
-  { x: -55.5, z: 53.6, w: 7.5, d: 0.8, h: 2.2 },
+  { x: -72.4, z: 62, w: 0.8, d: 16.8, h: 1.7 },
+  { x: -51.6, z: 62, w: 0.8, d: 16.8, h: 1.7 },
+  { x: -62, z: 70.4, w: 21.6, d: 0.8, h: 1.7 },
+  { x: -68.5, z: 53.6, w: 7.5, d: 0.8, h: 1.7 },
+  { x: -55.5, z: 53.6, w: 7.5, d: 0.8, h: 1.7 },
 ];
 
 // 脱出ゲート（南）
@@ -185,6 +236,9 @@ export const JAIL_SLOTS = [
   { x: -68, z: 65 },
   { x: -62, z: 65 },
   { x: -56, z: 65 },
+  // Build 4: 10人（泥棒6＋拘束中スパイ）でも足りるように2つ追加
+  { x: -71, z: 61.5 },
+  { x: -53, z: 61.5 },
 ];
 
 // お宝の候補スポット（この中から 5 箇所をランダムに選ぶ）
@@ -260,7 +314,7 @@ export const MAP = Object.freeze({
   jailWalls: JAIL_WALLS,
   gate: GATE,
   spawn: {
-    cop: { x: -62, z: 48, r: 4.5 },
+    cop: { x: -58, z: 44, r: 4.5 },
     thief: { x: -22, z: -46, r: 5.5 },
   },
   treasureSpots: TREASURE_SPOTS,
@@ -280,8 +334,19 @@ export const MAP = Object.freeze({
   ],
 });
 
-export const COP_NAMES = ['ポリスA', 'ポリスB', 'ポリスC', 'ポリスD', 'ポリスE'];
-export const THIEF_NAMES = ['ドロボウA', 'ドロボウB', 'ドロボウC', 'ドロボウD', 'ドロボウE', 'ドロボウF'];
+export const COP_NAMES = ['ポリスA', 'ポリスB', 'ポリスC', 'ポリスD', 'ポリスE', 'ポリスF'];
+export const THIEF_NAMES = [
+  'ドロボウA',
+  'ドロボウB',
+  'ドロボウC',
+  'ドロボウD',
+  'ドロボウE',
+  'ドロボウF',
+  'ドロボウG',
+  'ドロボウH',
+];
+/** Build 4: 頭上タグ用の文字。名前の末尾と同じ字を出すので、名前とタグがずれない */
+export const TAG_LETTERS = 'ABCDEFGHIJ'.split('');
 
 export function mulberry32(seed) {
   let a = seed >>> 0;
@@ -513,7 +578,7 @@ export class Nav {
  * 役職割り当て。
  * spyMode: 'both' | 'cops' | 'thieves' | 'none'
  *   cops    = 警察陣営に「内通者」(見た目は警官 / 目標は泥棒の勝ち)
- *   thieves = 泥棒陣営に「密告者」(見た目は泥棒 / 目標は警察の勝ち)
+ *   thieves = 泥棒陣営に「潜入捜査官」(見た目は泥棒 / 目標は警察の勝ち)
  * playerRole: 'auto' | 'cop' | 'thief'
  * playerSpy:  'random' | 'always' | 'never'
  */
@@ -527,8 +592,8 @@ export function assignRoles(opts = {}) {
     seed = 7,
   } = opts;
   const rng = mulberry32(seed);
-  const copSpyCount = spyMode === 'both' || spyMode === 'cops' ? 1 : 0;
-  const thiefSpyCount = spyMode === 'both' || spyMode === 'thieves' ? 1 : 0;
+  const copSpyCount = (spyMode === 'both' || spyMode === 'cops') && cops >= 2 ? 1 : 0;
+  const thiefSpyCount = (spyMode === 'both' || spyMode === 'thieves') && thieves >= 2 ? 1 : 0;
 
   const copRoles = Array.from({ length: cops }, (_, i) =>
     i < copSpyCount ? ROLE.COP_SPY : ROLE.COP,
@@ -570,6 +635,23 @@ export class Game {
     }
     this.seed = opts.seed ?? 20261121;
     this.spyMode = opts.spyMode ?? 'both';
+    // Build 4: 参加人数（4〜10人）。人数から警察・泥棒の内訳を自動で決める。
+    const explicitTeams = opts.cops != null || opts.thieves != null;
+    this.split = explicitTeams
+      ? {
+          cops: opts.cops ?? 3,
+          thieves: opts.thieves ?? 5,
+          total: (opts.cops ?? 3) + (opts.thieves ?? 5),
+        }
+      : splitTeams(opts.players ?? this.cfg.players ?? 8);
+    this.players = this.split.total;
+    // Build 4: 人数に合わせてお宝の必要数を自動調整（4人=3個 / 6人=4個 / 8〜10人=5個）
+    const treasureGoal = opts.treasureCount ?? treasureCountFor(this.players);
+    this.cfg = {
+      ...this.cfg,
+      treasureCount: Math.min(this.cfg.treasureSpots, treasureGoal),
+      treasureRequired: treasureGoal,
+    };
     this.rng = mulberry32(this.seed);
     this.autoplay = !!opts.autoplay;
     this.phase = 'playing';
@@ -591,12 +673,13 @@ export class Game {
       hides: 0,
       searches: 0,
       defections: 0,
+      touchRescues: 0,
     };
     this.input = { x: 0, z: 0, action: false };
 
     const roster = assignRoles({
-      cops: opts.cops ?? 3,
-      thieves: opts.thieves ?? 5,
+      cops: this.split.cops,
+      thieves: this.split.thieves,
       spyMode: opts.spyMode ?? 'both',
       playerRole: opts.playerRole ?? 'auto',
       playerSpy: opts.playerSpy ?? 'random',
@@ -607,17 +690,20 @@ export class Game {
 
     let copIdx = 0;
     let thiefIdx = 0;
+    let tagSeq = 0; // 頭上タグの字（A/B/…）は10人全体で重ならないように通し番号で振る
+    // Build 4: 人数が増えても開始位置が重ならないよう、人数に応じて輪を広げる
+    const nCopLooks = roster.filter((r) => r.looks === 'cop').length;
+    const nThiefLooks = roster.filter((r) => r.looks === 'thief').length;
     this.agents = roster.map((r) => {
       const base = r.looks === 'cop' ? MAP.spawn.cop : MAP.spawn.thief;
       const k = r.looks === 'cop' ? copIdx++ : thiefIdx++;
-      const ang = (k / 5) * Math.PI * 2 + 0.4;
-      const rad = base.r * (0.5 + 0.5 * ((k % 2) + 1) / 2);
+      const ring = Math.max(5, r.looks === 'cop' ? nCopLooks : nThiefLooks);
+      const ang = (k / ring) * Math.PI * 2 + 0.4;
+      const rad = base.r * (0.5 + 0.5 * (((k % 3) + 1) / 3));
       const a = {
         id: r.id,
-        name:
-          r.looks === 'cop'
-            ? COP_NAMES[k % COP_NAMES.length]
-            : THIEF_NAMES[k % THIEF_NAMES.length],
+        name: `${r.looks === 'cop' ? 'ポリス' : 'ドロボウ'}${TAG_LETTERS[tagSeq++ % TAG_LETTERS.length]}`,
+        tag: TAG_LETTERS[(tagSeq - 1) % TAG_LETTERS.length], // 頭上タグの字（寝返っても変わらない）
         role: r.role,
         team: r.team,
         isPlayer: r.isPlayer,
@@ -646,7 +732,21 @@ export class Game {
         path: null,
         pathTarget: null,
         pathAge: 0,
-        ai: { wp: Math.floor(this.rng() * 8), retarget: 0, hideFor: 0, hideCd: 0 },
+        stuckT: 0, // 進めていない時間（壁・角での引っかかり検知）
+        detour: null, // 引っかかった時に一時的に向かう回り込み地点
+        escapeT: 0, // 救出直後の逃走ブースト
+        jailedAt: 0, // 牢屋に入った時刻（Build 4: 先に捕まった順の救出のため）
+        touchCd: 0, // タッチ救出の連鎖防止
+        ai: {
+          wp: Math.floor(this.rng() * 8),
+          retarget: 0,
+          hideFor: 0,
+          hideCd: 0,
+          returnCd: 0, // お宝を戻したあとのクールタイム（潜入捜査官）
+          spyGoal: 'roam', // 人狼警察の狙い（unlock / cover / roam）
+          spyHold: 0, // その狙いを持ち続ける残り秒数
+          spyCover: null, // 警官から離れた持ち場
+        },
       };
       // 開始位置が建物にめり込んでいたら押し出す
       const solved = this.collide(a.x, a.z, this.cfg.radius);
@@ -697,14 +797,13 @@ export class Game {
     this.input.z = z || 0;
   }
 
-  /** ボタンを押した瞬間の即時アクション（密告・隠れる・捜索） */
+  /** ボタンを押した瞬間の即時アクション（隠れる・捜索） */
   setAction(down) {
     const wasDown = this.input.action;
     this.input.action = !!down;
     if (wasDown || !down) return;
     const p = this.player;
     if (!p || p.state !== 'free') return;
-    if (p.role === ROLE.THIEF_SPY) this.whistle(p);
     if (p.looks === 'thief') {
       if (p.hidden) this.unhide(p);
       else this.hide(p);
@@ -787,9 +886,30 @@ export class Game {
   }
 
   /**
+   * Build 4: スパイ作業中の「⚠ 接近！」アラート。
+   * 相手陣営（自分を発覚させられる側）が cfg.spyAlertRange（14m）以内に入ったら知らせる。
+   * 発覚する距離（7.5m）より手前で気づけるので、駆け引きできる。
+   */
+  spyAlert(agent) {
+    if (!agent || !agent.isSpy || agent.state !== 'free') return null;
+    const found = this.nearest(
+      agent,
+      (o) => o !== agent && o.state === 'free' && !o.hidden && o.team !== agent.team,
+      this.cfg.spyAlertRange + 0.01,
+    );
+    if (!found.agent) return null;
+    return {
+      dist: found.dist,
+      agent: found.agent,
+      danger: found.dist <= this.cfg.exposeRange + 2.5,
+      working: agent.actionT > 0,
+    };
+  }
+
+  /**
    * 捕まえられるか。
    *  - 警官の見た目 → 泥棒の見た目を確保できる。正体発覚した内通者（警官の見た目）も確保できる。
-   *  - 泥棒の見た目 → 正体発覚した密告者（泥棒の見た目）だけを牢屋へ送れる。
+   *  - 泥棒の見た目 → 正体発覚した潜入捜査官（泥棒の見た目）だけを牢屋へ送れる。
    *  - スパイ自身は捕まえる側には回れない（正体を隠すため）。
    */
   canArrest(actor, target) {
@@ -801,7 +921,9 @@ export class Game {
     // スパイは正体を隠しているので、自分からは捕まえられない（捕まえるのは本来の陣営の役目）
     if (actor.isSpy) return false;
     if (actor.looks === 'cop') {
-      if (target.looks === 'thief') return true;
+      // Build 4: 潜入捜査官（泥棒の見た目・本当は警察）は警察の通常逮捕対象から外す。
+      // 見た目が泥棒でも、警察にはつかまらない（ゲートのお宝戻しを見られて初めて正体発覚）。
+      if (target.looks === 'thief' && target.role !== ROLE.THIEF_SPY) return true;
       if (target.role === ROLE.COP_SPY && target.exposed) return true;
       return false;
     }
@@ -831,6 +953,7 @@ export class Game {
     const slot = this.freeJailSlot();
     thief.state = 'jailed';
     thief.jailSlot = slot;
+    thief.jailedAt = this.t; // 先に捕まった順の判定用（Build 4）
     thief.actionT = 0;
     thief.path = null;
     thief.x = JAIL_SLOTS[slot].x;
@@ -846,19 +969,51 @@ export class Game {
     return true;
   }
 
-  freeOne(cause, causeAgent) {
+  /**
+   * 牢屋から助ける相手の優先順位（Build 4）。
+   *   1. 直接タッチした相手
+   *   2. 人間プレイヤー（YOU）
+   *   3. 先に捕まった順（古い jailedAt）
+   */
+  pickJailTarget(jailed, direct = null) {
+    if (!jailed.length) return null;
+    if (direct && jailed.includes(direct)) return direct;
+    const player = jailed.find((a) => a.isPlayer);
+    if (player) return player;
+    let best = jailed[0];
+    for (const a of jailed) {
+      const at = a.jailedAt ?? 0;
+      const bestAt = best.jailedAt ?? 0;
+      if (at < bestAt || (at === bestAt && a.id < best.id)) best = a;
+    }
+    return best;
+  }
+
+  freeOne(cause, causeAgent, targetAgent = null) {
     const jailed = this.agents.filter((a) => a.team === 'thief' && a.state === 'jailed');
     if (!jailed.length) return null;
-    const target = jailed[0];
+    const target = this.pickJailTarget(jailed, targetAgent);
+    if (!target) return null;
     target.state = 'free';
     target.jailSlot = -1;
-    target.immune = this.cfg.freeImmunity;
+    target.jailedAt = 0;
+    // Build 4: 救出された直後は2.5秒間つかまらず、少しだけ足が速い（逃げ切れるように）
+    target.immune = this.cfg.rescueImmunity;
+    target.escapeT = this.cfg.rescueBoostTime;
     target.actionT = 0;
     target.hidden = false;
     target.path = null;
     target.x = MAP.jailDoor.x + (this.rng() - 0.5) * 2;
     target.z = MAP.jailDoor.z - 1.8;
-    if (cause === 'unlock') {
+    if (cause === 'touch') {
+      this.stats.rescues++;
+      this.pushEvent({
+        type: 'rescue',
+        by: causeAgent?.id ?? null,
+        target: target.id,
+        label: `🆘 ${target.name}をタッチ救出!（${causeAgent?.name ?? '仲間'}と逃走）`,
+      });
+    } else if (cause === 'unlock') {
       this.stats.unlocks++;
       this.pushEvent({
         type: 'unlock',
@@ -1054,7 +1209,7 @@ export class Game {
 
   pickup(agent, treasure) {
     if (treasure.state !== 'vault') return false;
-    if (agent.role === ROLE.THIEF_SPY) return false; // 密告者は運ばない
+    if (agent.role === ROLE.THIEF_SPY) return false; // 潜入捜査官は運ばない
     treasure.state = 'carried';
     treasure.carrier = agent.id;
     agent.carrying = treasure.id;
@@ -1120,34 +1275,17 @@ export class Game {
     this.hideBackTreasure(t);
     this.stats.returns++;
     this.stats.secured = this.securedCount;
-    this.pushEvent({ type: 'return', by: agent.id, label: `お宝が奪い返された! (${this.securedCount}/5)` });
+    agent.ai.returnCd = this.cfg.returnCooldown;
+    this.pushEvent({ type: 'return', by: agent.id, label: `お宝が戻された! (${this.securedCount}/${this.cfg.treasureRequired})` });
     return true;
   }
 
-  whistle(agent) {
-    if (this.phase !== 'playing' || agent.whistleCd > 0) return false;
-    if (agent.role !== ROLE.THIEF_SPY) return false;
-    const near = this.agents.filter(
-      (o) =>
-        o !== agent &&
-        o.state === 'free' &&
-        o.team === 'thief' &&
-        !o.hidden &&
-        dist(agent, o) <= this.cfg.whistleRange,
-    );
-    if (!near.length) return false;
-    agent.whistleCd = this.cfg.whistleCooldown;
-    for (const o of near) {
-      this.pings.push({ x: o.x, z: o.z, ttl: this.cfg.pingTtl, target: o.id });
-    }
-    this.stats.whistles++;
-    this.pushEvent({
-      type: 'whistle',
-      by: agent.id,
-      count: near.length,
-      label: `密告ピン ×${near.length}`,
-    });
-    return true;
+  /**
+   * Build 4: 旧アクションは廃止。潜入捜査官の仕事は「ゲートに運ばれたお宝を戻す」だけ。
+   * （呼び出し側の互換のために残してあるが、何も起きない）
+   */
+  whistle() {
+    return false;
   }
 
   pushEvent(e) {
@@ -1192,6 +1330,8 @@ export class Game {
     this.t += dt;
     this.time = Math.max(0, this.time - dt);
     for (const a of this.agents) this.tickAgent(a, dt);
+    // Build 4: キャラ同士が同じ位置に重なって「1人に見える」のを防ぐ
+    this.separateAgents();
     this.updatePings(dt);
     this.updateEffects(dt);
     this.checkWin();
@@ -1224,7 +1364,11 @@ export class Game {
     a.unlockCd = Math.max(0, a.unlockCd - dt);
     a.hideCd = Math.max(0, a.hideCd - dt);
     a.searchCd = Math.max(0, a.searchCd - dt);
+    a.touchCd = Math.max(0, a.touchCd - dt);
+    a.escapeT = Math.max(0, a.escapeT - dt);
+    if (a.detour) a.detour.t -= dt;
     a.ai.hideCd = Math.max(0, a.ai.hideCd - dt);
+    a.ai.returnCd = Math.max(0, (a.ai.returnCd || 0) - dt);
     a.pathAge += dt;
 
     // 隠れ続けられるのは最大 cfg.hideMax 秒
@@ -1268,17 +1412,14 @@ export class Game {
     const copLook = a.looks === 'cop';
     if (copLook && act && !nearDoor) speed *= this.cfg.copDash;
     if (a.hidden) speed = 0;
+    // タッチ救出の直後は少しだけ足が速い（2人とも逃げ切れるように）
+    if (a.escapeT > 0) speed *= this.cfg.rescueBoost;
 
-    const from = { x: a.x, z: a.z };
-    a.x += mx * speed * dt;
-    a.z += mz * speed * dt;
-    const solved = this.collide(a.x, a.z, this.cfg.radius);
-    a.x = clamp(solved.x, MAP.bounds.minX + 1, MAP.bounds.maxX - 1);
-    a.z = clamp(solved.z, MAP.bounds.minZ + 1, MAP.bounds.maxZ - 1);
+    // Build 4: 壁に引っかからず、角では壁沿いに滑る
+    this.moveWithSlide(a, mx, mz, speed, dt);
     if (mx || mz) a.dir = Math.atan2(mx, mz);
-    a.moving = Math.hypot(a.x - from.x, a.z - from.z) > 0.002;
 
-    // お宝を拾う（泥棒の見た目・密告者は拾わない・お宝持ちは拾わない）
+    // お宝を拾う（泥棒の見た目・潜入捜査官は拾わない・お宝持ちは拾わない）
     if (
       a.carrying == null &&
       a.looks === 'thief' &&
@@ -1294,7 +1435,19 @@ export class Game {
     // 搬出
     if (a.carrying != null && isInZone(a, MAP.gate)) this.deliver(a);
 
-    // 捕獲（警官の見た目は自動で確保／泥棒の見た目は発覚した密告者のみ）
+    // Build 4: まだ捕まっていない泥棒は、牢屋の仲間にタッチすると2人とも逃げられる
+    if (a.touchCd <= 0 && a.role === ROLE.THIEF && a.state === 'free' && !a.hidden) {
+      const mate = this.nearest(
+        a,
+        (o) => o.state === 'jailed' && o.team === 'thief',
+        this.cfg.touchRescueRange,
+      );
+      if (mate.agent && this.nav.lineFree(a.x, a.z, mate.agent.x, mate.agent.z)) {
+        this.touchRescue(a, mate.agent);
+      }
+    }
+
+    // 捕獲（警官の見た目は自動で確保／発覚した潜入捜査官のみ。潜入捜査官は警察につかまらない）
     if (a.arrestCd <= 0) {
       const tgt = this.nearest(a, (o) => this.canArrest(a, o), this.cfg.arrestRange);
       if (tgt.agent) this.arrest(a, tgt.agent);
@@ -1327,8 +1480,15 @@ export class Game {
         }
       }
     }
-    // 脱出ゲート前のゲージ（密告者がお宝を隠し戻す）
-    if (!acting && nearGate && act && a.role === ROLE.THIEF_SPY && this.securedCount > 0) {
+    // 脱出ゲート前のゲージ（潜入捜査官がお宝を戻す）
+    if (
+      !acting &&
+      nearGate &&
+      act &&
+      a.role === ROLE.THIEF_SPY &&
+      this.securedCount > 0 &&
+      a.ai.returnCd <= 0
+    ) {
       acting = true;
       a.actionT += dt;
       const witness = this.witnessOf(a);
@@ -1365,33 +1525,269 @@ export class Game {
     return { x, z };
   }
 
+  /**
+   * Build 4: 壁沿いに滑る移動。
+   * 斜めに wall/建物角へ突っ込んだ時、片軸だけでも進める向きへ回すことで
+   * 「角で引っかかってガクガクする」のを防ぐ。進めない時間も記録する。
+   */
+  moveWithSlide(a, mx, mz, speed, dt) {
+    const fromX = a.x;
+    const fromZ = a.z;
+    const want = Math.hypot(mx, mz) * speed * dt;
+    if (!(want > 1e-6)) {
+      a.moving = false;
+      a.stuckT = Math.max(0, a.stuckT - dt * 2);
+      return;
+    }
+    const dx = mx * speed * dt;
+    const dz = mz * speed * dt;
+    const clampX = (v) => clamp(v, MAP.bounds.minX + 1, MAP.bounds.maxX - 1);
+    const clampZ = (v) => clamp(v, MAP.bounds.minZ + 1, MAP.bounds.maxZ - 1);
+    const score = (p) => (p.x - fromX) * mx + (p.z - fromZ) * mz;
+
+    const full = this.collide(fromX + dx, fromZ + dz, this.cfg.radius);
+    let pick = { x: clampX(full.x), z: clampZ(full.z) };
+    let best = score(pick);
+
+    if (best < want - 1e-4) {
+      // 片軸だけの移動も試し、行きたい向きに一番進めるものを選ぶ
+      if (Math.abs(dx) > 1e-6) {
+        const onlyX = this.collide(fromX + dx, fromZ, this.cfg.radius);
+        const cand = { x: clampX(onlyX.x), z: fromZ };
+        const s = score(cand);
+        if (s > best + 1e-4) {
+          best = s;
+          pick = cand;
+        }
+      }
+      if (Math.abs(dz) > 1e-6) {
+        const onlyZ = this.collide(fromX, fromZ + dz, this.cfg.radius);
+        const cand = { x: fromX, z: clampZ(onlyZ.z) };
+        const s = score(cand);
+        if (s > best + 1e-4) {
+          best = s;
+          pick = cand;
+        }
+      }
+    }
+
+    // 同じ場所に留まらないよう、極端に小さい前進は捨てる（振動の原因）
+    const moved = Math.hypot(pick.x - fromX, pick.z - fromZ);
+    if (moved < want * 0.2) {
+      // 正面から壁に固定された時は、壁沿いに横へずれる（角から抜ける）
+      for (const s of [1, -1]) {
+        const cand = this.collide(
+          fromX + -mz * s * want,
+          fromZ + mx * s * want,
+          this.cfg.radius,
+        );
+        const cx = clampX(cand.x);
+        const cz = clampZ(cand.z);
+        const d = Math.hypot(cx - fromX, cz - fromZ);
+        if (d > moved * 1.3 && d > 1e-5) {
+          pick = { x: cx, z: cz };
+          break;
+        }
+      }
+    }
+
+    a.x = pick.x;
+    a.z = pick.z;
+    const progress = want > 0 ? best / want : 1;
+    if (progress < 0.25) a.stuckT += dt;
+    else a.stuckT = Math.max(0, a.stuckT - dt * 3);
+    a.moving = Math.hypot(a.x - fromX, a.z - fromZ) > 0.002;
+  }
+
+  /** 目標が建物の中なら、一番近い通行可能地点へ寄せる（壁の中へ歩き続けるのを防ぐ） */
+  freeTarget(t) {
+    if (!t || !this.nav) return t;
+    if (!this.nav.solidAt(t.x, t.z, this.cfg.radius + 0.15)) return t;
+    const cell = this.nav.cellOf(t.x, t.z);
+    const free = this.nav.nearestFree(cell.cx, cell.cz, 8);
+    if (!free) return t;
+    return this.nav.cellCenter(free.cx, free.cz);
+  }
+
+  /** 引っかかった時に、壁を回り込むための一時的な目標点 */
+  detourPoint(a, target) {
+    if (!target || !this.nav) return null;
+    const ang = Math.atan2(target.z - a.z, target.x - a.x);
+    const minX = MAP.bounds.minX + 2;
+    const maxX = MAP.bounds.maxX - 2;
+    const minZ = MAP.bounds.minZ + 2;
+    const maxZ = MAP.bounds.maxZ - 2;
+    const cands = [];
+    for (const off of [Math.PI / 2, -Math.PI / 2, (Math.PI * 3) / 4, (-Math.PI * 3) / 4, Math.PI]) {
+      for (const r of [1.6, 3.0, 4.6]) {
+        const x = clamp(a.x + Math.cos(ang + off) * r, minX, maxX);
+        const z = clamp(a.z + Math.sin(ang + off) * r, minZ, maxZ);
+        if (this.nav.solidAt(x, z, this.cfg.radius + 0.3)) continue;
+        cands.push({ x, z });
+      }
+    }
+    // 見通しの良い点を優先。なければ「立てる点」でもいいので使う（正面固定からの脱出を優先）
+    for (const c of cands) if (this.nav.lineFree(a.x, a.z, c.x, c.z)) return c;
+    return cands[0] || null;
+  }
+
+  /**
+   * Build 4: キャラ同士が重なって「1人に見える」のを防ぐ。
+   * プレイヤーは操作感を変えないよう押されにくくしてある。
+   */
+  separateAgents() {
+    const free = this.agents.filter((a) => a.state === 'free' && !a.hidden);
+    const min = 1.0;
+    for (let i = 0; i < free.length; i++) {
+      for (let j = i + 1; j < free.length; j++) {
+        const a = free[i];
+        const b = free[j];
+        let dx = b.x - a.x;
+        let dz = b.z - a.z;
+        let d = Math.hypot(dx, dz);
+        if (d >= min) continue;
+        const gap = d;
+        if (d < 1e-4) {
+          dx = 0.2 + ((i + j) % 3) * 0.1;
+          dz = 0.1;
+          d = Math.hypot(dx, dz);
+        }
+        const ux = dx / d;
+        const uz = dz / d;
+        const push = (min - gap) * 0.5;
+        const wa = a.isPlayer ? 0.3 : 1;
+        const wb = b.isPlayer ? 0.3 : 1;
+        // 正面衝突のまま固まらないよう、ペアごとに一定方向へ横流れさせる
+        const side = (i * 3 + j * 5) % 2 === 0 ? 1 : -1;
+        const along = 0.55;
+        const ax = (-ux + -uz * side * along) * push * wa;
+        const az = (-uz + ux * side * along) * push * wa;
+        const bx = (ux + -uz * side * along) * push * wb;
+        const bz = (uz + ux * side * along) * push * wb;
+        const pa = this.collide(a.x + ax, a.z + az, this.cfg.radius);
+        a.x = clamp(pa.x, MAP.bounds.minX + 1, MAP.bounds.maxX - 1);
+        a.z = clamp(pa.z, MAP.bounds.minZ + 1, MAP.bounds.maxZ - 1);
+        const pb = this.collide(b.x + bx, b.z + bz, this.cfg.radius);
+        b.x = clamp(pb.x, MAP.bounds.minX + 1, MAP.bounds.maxX - 1);
+        b.z = clamp(pb.z, MAP.bounds.minZ + 1, MAP.bounds.maxZ - 1);
+        a.moving = b.moving = true;
+      }
+    }
+  }
+
+  /** タッチ救出に向かうのは、牢屋に一番近い泥棒1人だけ（大勢で押し合って固まらないため） */
+  nearestRescuer(a) {
+    const door = MAP.jailDoor;
+    let me = Infinity;
+    let other = Infinity;
+    for (const o of this.agents) {
+      if (o.state !== 'free' || o.role !== ROLE.THIEF) continue;
+      const d = Math.hypot(o.x - door.x, o.z - door.z);
+      if (o === a) me = d;
+      else other = Math.min(other, d);
+    }
+    return me < other + 0.01;
+  }
+
+  /** すぐそばの牢屋の仲間（タッチ救出できる相手） */
+  nearJailedMate(agent, range = this.cfg.touchRescueRange) {
+    if (!agent || agent.state !== 'free') return null;
+    const found = this.nearest(
+      agent,
+      (o) => o.state === 'jailed' && o.team === 'thief',
+      range,
+    );
+    return found.agent || null;
+  }
+
+  /** Build 4: タッチ救出。牢屋にタッチした泥棒と、捕まっていた仲間の2人が逃げる */
+  touchRescue(rescuer, target) {
+    if (this.phase !== 'playing') return false;
+    if (!rescuer || !target || target.state !== 'jailed') return false;
+    if (rescuer.role !== ROLE.THIEF || rescuer.state !== 'free' || rescuer.hidden) return false;
+    if (rescuer.touchCd > 0) return false;
+    if (!this.nav.lineFree(rescuer.x, rescuer.z, target.x, target.z)) return false;
+    const freed = this.freeOne('touch', rescuer, target);
+    if (!freed) return false;
+    rescuer.touchCd = this.cfg.touchRescueCd;
+    rescuer.immune = Math.max(rescuer.immune, this.cfg.freeImmunity);
+    rescuer.escapeT = 1.2;
+    this.stats.touchRescues++;
+    return true;
+  }
+
+  /** 人狼警察が警官から離れて身を隠す持ち場（警官から遠く、牢屋からも少し離れた場所） */
+  coverPoint(a) {
+    const cops = this.agents.filter((o) => o.looks === 'cop' && o.state === 'free' && !o.isSpy);
+    let best = null;
+    let bestScore = -Infinity;
+    for (const p of this.patrol) {
+      let nearestCop = 99;
+      for (const c of cops) nearestCop = Math.min(nearestCop, Math.hypot(c.x - p.x, c.z - p.z));
+      const fromJail = Math.hypot(p.x - MAP.jailDoor.x, p.z - MAP.jailDoor.z);
+      // 牢屋から 12〜28m くらいの位置を好む（遠すぎると解錠に戻るのが遅くなる）
+      const jailFit = 1 - Math.min(1, Math.abs(fromJail - 14) / 18);
+      const score = nearestCop + jailFit * 20 + this.rng() * 3;
+      if (score > bestScore) {
+        bestScore = score;
+        best = p;
+      }
+    }
+    return best;
+  }
+
   // ---- 経路の追従 ---------------------------------------------------------
   moveToward(a, target, dt) {
     if (!target) return { mx: 0, mz: 0 };
-    const dToTarget = Math.hypot(target.x - a.x, target.z - a.z);
+
+    // Build 4: 引っかかったら、いったん壁を回り込む点へ向かう
+    if (a.detour) {
+      const dd = Math.hypot(a.detour.x - a.x, a.detour.z - a.z);
+      if (dd < 0.6 || a.detour.t <= 0) {
+        a.detour = null;
+        a.stuckT = 0;
+        a.path = null;
+      } else {
+        const k = dd || 1;
+        return { mx: (a.detour.x - a.x) / k, mz: (a.detour.z - a.z) / k };
+      }
+    } else if (a.stuckT > this.cfg.stuckAfter) {
+      const p = this.detourPoint(a, target);
+      a.stuckT = 0;
+      if (p) {
+        a.detour = { x: p.x, z: p.z, t: this.cfg.detourTime };
+        a.path = null;
+        const k = Math.hypot(p.x - a.x, p.z - a.z) || 1;
+        return { mx: (p.x - a.x) / k, mz: (p.z - a.z) / k };
+      }
+    }
+
+    // 目標が建物・柵の中なら、一番近い外側の点へ読み替える
+    const goal = this.freeTarget(target);
+    const dToTarget = Math.hypot(goal.x - a.x, goal.z - a.z);
     if (dToTarget < 0.4) {
       a.path = null;
       return { mx: 0, mz: 0 };
     }
     const targetMoved =
-      !a.pathTarget || Math.hypot(a.pathTarget.x - target.x, a.pathTarget.z - target.z) > 2.6;
+      !a.pathTarget || Math.hypot(a.pathTarget.x - goal.x, a.pathTarget.z - goal.z) > 2.6;
     const stale = !a.path || a.pathAge > 1.4;
-    const straight = this.nav.lineFree(a.x, a.z, target.x, target.z);
+    const straight = this.nav.lineFree(a.x, a.z, goal.x, goal.z);
     if (straight) {
       a.path = null;
-      a.pathTarget = { x: target.x, z: target.z };
-      const d = Math.hypot(target.x - a.x, target.z - a.z) || 1;
-      return { mx: (target.x - a.x) / d, mz: (target.z - a.z) / d };
+      a.pathTarget = { x: goal.x, z: goal.z };
+      const d = Math.hypot(goal.x - a.x, goal.z - a.z) || 1;
+      return { mx: (goal.x - a.x) / d, mz: (goal.z - a.z) / d };
     }
     if (stale || targetMoved) {
-      const path = this.nav.findPath(a.x, a.z, target.x, target.z);
+      const path = this.nav.findPath(a.x, a.z, goal.x, goal.z);
       a.path = path && path.length ? path : null;
-      a.pathTarget = { x: target.x, z: target.z };
+      a.pathTarget = { x: goal.x, z: goal.z };
       a.pathAge = 0;
     }
     if (!a.path || !a.path.length) {
-      const d = Math.hypot(target.x - a.x, target.z - a.z) || 1;
-      return { mx: (target.x - a.x) / d, mz: (target.z - a.z) / d };
+      const d = Math.hypot(goal.x - a.x, goal.z - a.z) || 1;
+      return { mx: (goal.x - a.x) / d, mz: (goal.z - a.z) / d };
     }
     while (a.path.length > 1 && Math.hypot(a.path[0].x - a.x, a.path[0].z - a.z) < 0.9) {
       a.path.shift();
@@ -1425,20 +1821,38 @@ export class Game {
         }
       }
     } else if (a.role === ROLE.COP_SPY) {
-      // 内通者: 誰も見ていない隙に牢屋を解錠する
+      // 内通者: 誰も見ていない隙に牢屋を解錠する。
+      // Build 4: 警官が近づくたびに「牢屋↔持ち場」を往復してガクついていたので、
+      // 狙いは数秒単位で決め直し、警官が近い間は静かに持ち場で待つようにした。
       const jailed = this.agents.filter((o) => o.team === 'thief' && o.state === 'jailed');
       const copNear = this.nearest(
         a,
-        (o) => o.role === ROLE.COP && o.state === 'free' && dist(a, o) < 7.5,
-        7.5,
+        (o) => o.role === ROLE.COP && o.state === 'free',
+        this.cfg.spyClearRange,
       );
-      if (jailed.length && a.unlockCd <= 0 && !copNear.agent) {
+      a.ai.spyHold = Math.max(0, (a.ai.spyHold || 0) - dt);
+      if (a.ai.spyHold <= 0) {
+        const canUnlock = jailed.length > 0 && a.unlockCd <= 0;
+        if (canUnlock && !copNear.agent) {
+          a.ai.spyGoal = 'unlock';
+          a.ai.spyHold = 7 + this.rng() * 3;
+        } else {
+          a.ai.spyGoal = 'cover';
+          a.ai.spyHold = this.cfg.spyHoldMin + this.rng() * 3;
+          a.ai.spyCover = this.coverPoint(a);
+        }
+      }
+      if (a.ai.spyGoal === 'unlock' && copNear.agent && copNear.dist < this.cfg.spyAbortRange) {
+        a.ai.spyGoal = 'cover';
+        a.ai.spyHold = this.cfg.spyHoldMin + this.rng() * 2;
+        a.ai.spyCover = this.coverPoint(a);
+      }
+      if (a.ai.spyGoal === 'unlock' && jailed.length) {
         target = MAP.jailDoor;
-        if (dist(a, MAP.jailDoor) < this.cfg.actionRange - 0.4) act = true;
-      } else if (jailed.length && copNear.agent) {
-        target = { x: -30, z: 40 }; // 怪しまれないよう持ち場へ
+        if (dist(a, MAP.jailDoor) < this.cfg.actionRange - 0.4 && !copNear.agent) act = true;
       } else {
-        target = this.patrolPoint(a);
+        // 怪しまれないよう、警官から一番遠い持ち場へ歩いていく（ダッシュはしない）
+        target = a.ai.spyCover || this.patrolPoint(a);
       }
     } else if (a.role === ROLE.THIEF) {
       // 隠れている間は警察が離れるまで待つ
@@ -1457,7 +1871,16 @@ export class Game {
         (o) => o.looks === 'cop' && o.state === 'free' && !o.exposed && this.canSee(o, a),
         this.cfg.thiefDodge,
       );
-      const jailed = this.jailedTeammates(a).length;
+      const jailedList = this.agents.filter((o) => o.team === 'thief' && o.state === 'jailed');
+      const jailed = jailedList.length;
+      // 牢屋の前に警官が張っていないか（タッチ救出に向かうかの判断）
+      const jailGuarded = this.agents.some(
+        (o) =>
+          o.looks === 'cop' &&
+          o.state === 'free' &&
+          !o.exposed &&
+          Math.hypot(o.x - MAP.jailDoor.x, o.z - MAP.jailDoor.z) < 13,
+      );
       if (a.carrying != null) {
         target = MAP.gate;
         act = false;
@@ -1472,6 +1895,15 @@ export class Game {
           }
         } else {
           target = this.fleePoint(a, copNear.agent);
+        }
+      } else if (jailed >= 1 && !copNear.agent && !jailGuarded && a.touchCd <= 0 && this.nearestRescuer(a)) {
+        // Build 4: 牢屋の中まで入って、捕まった仲間にタッチで救出する
+        // 助ける相手は「プレイヤー優先 → 先に捕まった順」
+        const mate = this.pickJailTarget(jailedList);
+        if (mate) {
+          target = { x: mate.x, z: mate.z };
+        } else {
+          target = MAP.jailDoor;
         }
       } else if (jailed >= 2 && !copNear.agent) {
         target = MAP.jailDoor;
@@ -1497,15 +1929,20 @@ export class Game {
         }
       }
     } else if (a.role === ROLE.THIEF_SPY) {
-      // 密告者: 泥棒に紛れて密告し、運ばれたお宝を奪い返す
+      // 潜入捜査官: 運ばれたお宝をゲートから戻すのが仕事（Build 4）
       const thieves = this.agents.filter((o) => o !== a && o.role === ROLE.THIEF && o.state === 'free');
       const copNear = this.nearest(a, (o) => o.looks === 'cop' && o.state === 'free', 6);
-      if (a.whistleCd <= 0 && thieves.filter((o) => dist(a, o) < this.cfg.whistleRange).length >= 2) {
-        this.whistle(a);
-      }
       if (this.securedCount > 0) {
         target = MAP.gate;
-        if (dist(a, MAP.gate) < this.cfg.returnRange - 0.5) act = true;
+        // 泥棒に見られていない時だけ作業する（見られたら15秒拘束→寝返り）
+        const watched = this.nearest(
+          a,
+          (o) => o.state === 'free' && !o.hidden && o.team !== a.team,
+          this.cfg.exposeRange + 1.5,
+        ).agent;
+        if (!watched && a.ai.returnCd <= 0 && dist(a, MAP.gate) < this.cfg.returnRange - 0.5) {
+          act = true;
+        }
       } else if (thieves.length) {
         const leader = thieves.reduce((m, o) => (dist(a, o) < dist(a, m) ? o : m), thieves[0]);
         target = { x: leader.x, z: leader.z };

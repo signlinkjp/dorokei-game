@@ -325,6 +325,223 @@ if (want('search')) {
   await page.close();
 }
 
+// ================= Build 4 の見た目確認用 =================
+// ---- タイトル（人数選択が見える） --------------------------------------
+if (want('b4-title')) {
+  const page = await openPage(PHONE);
+  await page.goto(base, { waitUntil: 'load' });
+  await page.waitForTimeout(2600);
+  await page.click('#sizePick .seg-btn[data-size="10"]');
+  await page.waitForTimeout(300);
+  const note = await page.evaluate(() => ({
+    note: document.getElementById('sizeNote').textContent,
+    rule: document.getElementById('ruleThief').textContent,
+    active: document.querySelector('#sizePick .seg-btn.active')?.dataset.size,
+  }));
+  console.log('b4-title:', JSON.stringify(note));
+  await shoot(page, 'dorokei-b4-title.png', 300);
+  await page.close();
+}
+
+// ---- 10人プレイ（HUDカウント・識別タグ・お宝5個） ----------------------
+if (want('b4-play')) {
+  const page = await openPage({ width: 932, height: 430 });
+  await page.goto(`${base}?demo=1&warp=4&hud=1`, { waitUntil: 'load' });
+  await page.waitForTimeout(2000);
+  const info = await page.evaluate(async () => {
+    const { startGame, world } = window.__dorokei;
+    startGame({ players: 10, playerRole: 'thief', playerSpy: 'never', spyMode: 'none', seed: 9, autoplay: true });
+    await new Promise((r) => setTimeout(r, 250));
+    window.__dorokei.freeze(true);
+    const g = window.__dorokei.game;
+    const p = g.player;
+    // 駅前で、お宝を運ぶ泥棒＋追う警官＋仲間の並びを作る
+    for (const a of g.agents) if (a !== p && a.state === 'free') { a.x = 72; a.z = 72; }
+    p.state = 'free';
+    p.x = -22;
+    p.z = 4;
+    p.dir = Math.PI;
+    const t0 = g.treasures[0];
+    t0.state = 'carried';
+    t0.carrier = p.id;
+    p.carrying = t0.id;
+    const cops = g.agents.filter((a) => a.looks === 'cop').slice(0, 2);
+    cops[0].x = -14;
+    cops[0].z = 10;
+    cops[1].x = -9;
+    cops[1].z = 0;
+    const mates = g.agents.filter((a) => a.looks === 'thief' && a !== p).slice(0, 3);
+    mates[0].x = -28;
+    mates[0].z = 1;
+    mates[1].x = -26;
+    mates[1].z = 9;
+    mates[2].x = -30;
+    mates[2].z = 12;
+    world.setView('follow');
+    world.snapCamera();
+    world.update(g, 1 / 60);
+    return {
+      players: g.players,
+      required: g.cfg.treasureRequired,
+      hud: {
+        cops: document.getElementById('copCount').textContent,
+        thieves: document.getElementById('thiefCount').textContent,
+        loot: document.getElementById('lootCount').textContent,
+      },
+      tags: [...world.chars.values()].map((c) => c.userData.tagText),
+      guide: world.carryGuide.visible,
+    };
+  });
+  console.log('b4-play:', JSON.stringify(info));
+  await shoot(page, 'dorokei-b4-play.png', 400);
+  await page.close();
+}
+
+// ---- 高いビルの裏（オクルージョン透過） --------------------------------
+if (want('b4-occlusion')) {
+  const page = await openPage({ width: 932, height: 430 });
+  await page.goto(`${base}?demo=1&warp=3&hud=1`, { waitUntil: 'load' });
+  await page.waitForTimeout(1800);
+  const info = await page.evaluate(() => {
+    const { game, world, freeze } = window.__dorokei;
+    freeze(true);
+    const p = game.player;
+    for (const a of game.agents) if (a !== p) { a.x = 72; a.z = 72; }
+    p.state = 'free';
+    p.x = 62;
+    p.z = -24.8;
+    p.dir = Math.PI;
+    world.setView('follow');
+    world.snapCamera();
+    for (let i = 0; i < 30; i++) world.update(game, 1 / 60);
+    const museum = world.buildings.find((b) => Math.abs(b.x - 62) < 1 && Math.abs(b.z + 16) < 1);
+    return { occluded: world.occluded, fade: museum && +museum.fade.toFixed(2), lift: +world.camLift.toFixed(1) };
+  });
+  console.log('b4-occlusion:', JSON.stringify(info));
+  await shoot(page, 'dorokei-b4-occlusion.png', 400);
+  await page.close();
+}
+
+// ---- 牢屋（見通し・JAILの目印・収容された泥棒） ----------------------
+if (want('b4-jail')) {
+  const page = await openPage({ width: 932, height: 430 });
+  await page.goto(`${base}?demo=1&warp=3&hud=1`, { waitUntil: 'load' });
+  await page.waitForTimeout(1800);
+  const info = await page.evaluate(() => {
+    const { game, world, freeze } = window.__dorokei;
+    freeze(true);
+    const p = game.player;
+    for (const a of game.agents) if (a !== p) { a.x = 72; a.z = 72; }
+    p.state = 'free';
+    p.x = -62;
+    p.z = 44;
+    p.dir = 0;
+    const thieves = game.agents.filter((a) => a.looks === 'thief' && a !== p).slice(0, 3);
+    thieves.forEach((th, i) => {
+      th.state = 'jailed';
+      th.jailSlot = i;
+      th.jailedAt = game.t - 10 + i;
+      th.x = [-68, -62, -56][i];
+      th.z = 58;
+      th.hidden = false;
+    });
+    world.setView('follow');
+    world.snapCamera();
+    for (let i = 0; i < 10; i++) world.update(game, 1 / 60);
+    return { jailed: game.counts().jailed, badge: !!world.jailBadge, beam: !!world.jailBeam };
+  });
+  console.log('b4-jail:', JSON.stringify(info));
+  await shoot(page, 'dorokei-b4-jail.png', 400);
+  await page.close();
+}
+
+// ---- 脱出ゲート（光の柱・浮かぶしるし・地面の矢印） --------------------
+if (want('b4-gate')) {
+  const page = await openPage({ width: 932, height: 430 });
+  await page.goto(`${base}?demo=1&warp=3&hud=1`, { waitUntil: 'load' });
+  await page.waitForTimeout(1800);
+  const info = await page.evaluate(() => {
+    const { game, world, freeze } = window.__dorokei;
+    freeze(true);
+    const p = game.player;
+    for (const a of game.agents) if (a !== p) { a.x = 72; a.z = 72; }
+    p.state = 'free';
+    p.x = 0;
+    p.z = 62;
+    p.dir = 0;
+    const t0 = game.treasures[0];
+    t0.state = 'carried';
+    t0.carrier = p.id;
+    p.carrying = t0.id;
+    world.setView('top');
+    world.snapCamera();
+    for (let i = 0; i < 10; i++) world.update(game, 1 / 60);
+    return { guide: world.carryGuide.visible, beacon: !!world.gateBeacon, pillar: !!world.gatePillar };
+  });
+  console.log('b4-gate:', JSON.stringify(info));
+  await shoot(page, 'dorokei-b4-gate.png', 400);
+  await page.close();
+}
+
+// ---- キャラ（POLICEロゴ・識別タグ）: 正面と背面 ----------------------
+if (want('b4-chars')) {
+  for (const [name, url] of [
+    ['dorokei-b4-chars-front.png', `${base}?chars=1`],
+    ['dorokei-b4-chars-back.png', `${base}?chars=1&back=1`],
+    ['dorokei-b4-chars-carry.png', `${base}?chars=1&carry=1`],
+  ]) {
+    const page = await openPage(WIDE);
+    await page.goto(url, { waitUntil: 'load' });
+    await page.waitForTimeout(2200);
+    await shoot(page, name, 400);
+    await page.close();
+  }
+}
+
+// ---- スパイの接近アラート -------------------------------------------
+if (want('b4-spy')) {
+  const page = await openPage({ width: 932, height: 430 });
+  await page.goto(`${base}?demo=1&warp=3&hud=1`, { waitUntil: 'load' });
+  await page.waitForTimeout(1800);
+  const info = await page.evaluate(async () => {
+    const { startGame, world, freeze } = window.__dorokei;
+    startGame({ players: 8, playerRole: 'cop', playerSpy: 'always', spyMode: 'both', seed: 45, autoplay: true });
+    await new Promise((r) => setTimeout(r, 300));
+    const g = window.__dorokei.game;
+    const spy = g.player;
+    spy.state = 'free';
+    // 牢屋の前で解錠しようとしている人狼警察に、警官が気づいて近づいてくる場面
+    spy.x = -62;
+    spy.z = 47;
+    spy.dir = 0;
+    spy.actionT = 0.8;
+    const opp = g.agents.find((a) => a.role === 'cop' && a !== spy);
+    opp.x = -50;
+    opp.z = 47;
+    opp.dir = -Math.PI / 2;
+    for (const a of g.agents) {
+      if (a !== spy && a !== opp && a.state === 'free') { a.x = 72; a.z = 72; }
+    }
+    const jailed = g.agents.find((a) => a.looks === 'thief');
+    if (jailed) {
+      jailed.state = 'jailed';
+      jailed.jailSlot = 1;
+      jailed.jailedAt = g.t - 5;
+      jailed.x = -62;
+      jailed.z = 58;
+    }
+    world.setView('follow');
+    world.snapCamera();
+    for (let i = 0; i < 12; i++) world.update(g, 1 / 60);
+    freeze(true);
+    g.step(1 / 60);
+    return { alert: g.spyAlert(spy), tag: document.getElementById('spyAlert').textContent, hidden: document.getElementById('spyAlert').classList.contains('hidden') };
+  });
+  console.log('b4-spy:', JSON.stringify(info));
+  await shoot(page, 'dorokei-b4-spy.png', 400);
+  await page.close();
+}
+
 const errors = logs.filter((l) => /\[error\]|pageerror/i.test(l));
 console.log('console errors:', errors.length ? errors.join('\n') : '(none)');
 if (logs.length > errors.length) console.log('warnings:', logs.length - errors.length);

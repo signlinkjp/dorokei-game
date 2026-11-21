@@ -2,7 +2,7 @@
 // 音（Web Audio）・言語・ステージ選択・設定／あそびかた／プライバシーのモーダル、
 // 茂みの残り秒数ゲージ、警察の「🔍 捜索」、自分の役とミッションの常時表示、
 // プレイ中の MENU（タイトルへ戻る）、牢屋・拘束中のスティック俯瞰カメラをまとめて面倒みる。
-import { Game, ROLE, MAP, CFG, spyNameKey, spyDescKey } from './core.js';
+import { Game, ROLE, MAP, CFG, splitTeams, treasureCountFor, spyNameKey, spyDescKey } from './core.js';
 import { World } from './render.js';
 import { Minimap } from './minimap.js';
 import { AudioEngine, pickSfx } from './audio.js';
@@ -13,6 +13,33 @@ const $ = (id) => document.getElementById(id);
 const canvas = $('scene');
 const world = new World(canvas);
 const minimap = new Minimap($('minimap'));
+
+// ---- Build 4: 長押しのコピー・文字選択・iOS のメニューを無効化 -------------
+// ゲーム画面（タイトル・HUD・ジョイスティック・アクションボタン）で長押ししても
+// 「コピー / 翻訳 / 共有」が出ないようにする。入力欄だけは例外。
+const TEXT_ENTRY = 'input, textarea, select, option, [contenteditable="true"]';
+const isTextEntry = (el) => !!(el && el.closest && el.closest(TEXT_ENTRY));
+for (const type of ['contextmenu', 'selectstart', 'dragstart', 'dblclick']) {
+  document.addEventListener(
+    type,
+    (e) => {
+      if (isTextEntry(e.target)) return;
+      e.preventDefault();
+    },
+    { capture: true },
+  );
+}
+// Safari が長押しで選択を始めてしまった場合の後始末
+function dropStraySelection() {
+  const sel = typeof window.getSelection === 'function' ? window.getSelection() : null;
+  if (!sel || !sel.rangeCount || sel.isCollapsed) return;
+  const node = sel.anchorNode;
+  const el = node && (node.nodeType === 1 ? node : node.parentElement);
+  if (isTextEntry(el)) return;
+  sel.removeAllRanges();
+}
+document.addEventListener('selectionchange', dropStraySelection);
+window.addEventListener('touchend', () => setTimeout(dropStraySelection, 30), { passive: true });
 
 const ui = {
   hud: $('hud'),
@@ -34,6 +61,7 @@ const ui = {
   gauge: $('gauge'),
   gaugeLabel: $('gaugeLabel'),
   gaugeFill: $('gaugeFill'),
+  spyAlert: $('spyAlert'),
   hideGauge: $('hideGauge'),
   hideLabel: $('hideLabel'),
   hideFill: $('hideFill'),
@@ -81,6 +109,7 @@ const DEFAULTS = {
   duration: 300,
   lang: DEFAULT_LANG,
   stage: DEFAULT_STAGE,
+  players: 8,
   playerRole: 'auto',
   spyMode: 'both',
   playerSpy: 'random',
@@ -100,6 +129,7 @@ const settings = loadSettings();
 if (!CFG.durations.includes(Number(settings.duration))) settings.duration = DEFAULTS.duration;
 if (!isStagePlayable(settings.stage)) settings.stage = DEFAULT_STAGE;
 if (!LANGS.some((l) => l.id === settings.lang)) settings.lang = DEFAULT_LANG;
+if (!CFG.playerOptions.includes(Number(settings.players))) settings.players = DEFAULTS.players;
 
 function saveSettings() {
   try {
@@ -262,6 +292,28 @@ function renderStageCards() {
     if (s.available) b.title = lang() === 'ja' ? s.desc : s.descEn;
     ui.stageGrid.appendChild(b);
   }
+  renderSizeNote();
+}
+
+/** Build 4: 選んだ人数と、そのときの警察・泥棒の内訳を表示する */
+function renderSizeNote() {
+  const note = $('sizeNote');
+  if (!note) return;
+  const n = Number(settings.players) || DEFAULTS.players;
+  const s = splitTeams(n);
+  const loot = treasureCountFor(n);
+  note.classList.remove('hidden');
+  note.textContent = t('players.note', lang())
+    .replace('{n}', String(s.total))
+    .replace('{cops}', String(s.cops))
+    .replace('{thieves}', String(s.thieves))
+    .replace('{loot}', String(loot));
+  syncSeg('sizePick', 'size', n);
+  // お宝の数に合わせて、ルール説明とあそびかたの表示も合わせる
+  const rule = $('ruleThief');
+  if (rule) rule.textContent = t('rule.thief', lang()).replace('{n}', String(loot));
+  const goal = $('lootGoal');
+  if (goal) goal.textContent = `×${loot}`;
 }
 
 function setLang(id) {
@@ -347,6 +399,11 @@ function syncSeg(id, attr, value) {
 }
 
 bindSeg('rolePick', 'playerRole', 'role');
+bindSeg('sizePick', 'players', 'size', (v) => {
+  settings.players = Number(v) || DEFAULTS.players;
+  saveSettings();
+  renderSizeNote();
+});
 bindSeg('spyPick', 'spyMode', 'spy');
 bindSeg('selfSpyPick', 'playerSpy', 'self');
 bindSeg('timePick', 'duration', 'duration', (v) => {
@@ -408,6 +465,7 @@ function startGame(opts = {}) {
   const params = new URLSearchParams(location.search);
   game = new Game({
     seed: opts.seed ?? Number(params.get('seed') || Math.floor(Math.random() * 99999)),
+    players: opts.players ?? Number(settings.players) ?? DEFAULTS.players,
     playerRole: opts.playerRole ?? settings.playerRole,
     spyMode: opts.spyMode ?? settings.spyMode,
     playerSpy: opts.playerSpy ?? settings.playerSpy,
@@ -645,10 +703,14 @@ function actionLabel(p) {
       : { text: 'ダッシュ', cls: 'spy' };
   }
   if (p.role === ROLE.THIEF_SPY) {
-    if (nearGate && game.securedCount > 0) return { text: 'もどす\n長押し', cls: 'spy' };
-    return { text: '密告', cls: 'spy' };
+    // Build 4: 旧アクションは廃止。ゲートに運ばれたお宝を戻すのが仕事。
+    if (nearGate && game.securedCount > 0) return { text: 'お宝を戻す\n長押し', cls: 'spy' };
+    if (game.securedCount > 0) return { text: 'お宝を戻しに', cls: 'spy' };
+    return { text: '待機', cls: 'spy' };
   }
   if (p.carrying != null) return { text: 'にげろ', cls: '' };
+  // Build 4: 牢屋の仲間に触れれば、その場でタッチ救出できる
+  if (game.nearJailedMate(p)) return { text: 'タッチ救出!', cls: 'hidden-mode' };
   if (nearDoor && jailedCount > 0) return { text: '救出\n長押し', cls: '' };
   if (p.hidden) return { text: '出る', cls: 'hidden-mode' };
   if (game.bushAt(p) >= 0) {
@@ -716,8 +778,8 @@ function updateHud(dt) {
           : 'Unlocking…'
         : p.role === ROLE.THIEF_SPY
           ? lang() === 'ja'
-            ? 'お宝を奪い返し中…'
-            : 'Taking loot back…'
+            ? 'お宝を戻し中…'
+            : 'Returning loot…'
           : lang() === 'ja'
             ? '救出中…'
             : 'Rescuing…';
@@ -738,6 +800,23 @@ function updateHud(dt) {
   if (p.isSpy) {
     const note = spyNoteFor(p);
     if (ui.spyNote.textContent !== note) ui.spyNote.textContent = note;
+  }
+
+  // Build 4: スパイ作業中、相手陣営が近づいたら「⚠ 接近！」
+  const alert = p.isSpy && p.state === 'free' ? game.spyAlert(p) : null;
+  if (alert && ui.spyAlert) {
+    ui.spyAlert.classList.remove('hidden');
+    ui.spyAlert.classList.toggle('danger', alert.danger);
+    const txt =
+      lang() === 'ja'
+        ? `⚠ 接近! ${alert.dist.toFixed(1)}m`
+        : `⚠ Close! ${alert.dist.toFixed(1)}m`;
+    if (ui.spyAlert.dataset.label !== txt) {
+      ui.spyAlert.textContent = txt;
+      ui.spyAlert.dataset.label = txt;
+    }
+  } else if (ui.spyAlert) {
+    ui.spyAlert.classList.add('hidden');
   }
 
   // イベントフィード（新しいイベントに効果音を付ける）
@@ -914,6 +993,7 @@ buildLangSelect();
 applyI18n(document, settings.lang);
 renderStageCards();
 syncSeg('rolePick', 'role', settings.playerRole);
+syncSeg('sizePick', 'size', settings.players);
 syncSeg('spyPick', 'spy', settings.spyMode);
 syncSeg('selfSpyPick', 'self', settings.playerSpy);
 syncSeg('timePick', 'duration', settings.duration);

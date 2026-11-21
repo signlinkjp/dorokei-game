@@ -25,16 +25,16 @@ export const DEFAULT_LANG = 'ja';
 export const STRINGS = {
   'title.sub': { ja: 'ドロケー × 人狼', en: 'Cops & Robbers × Hidden Spies' },
   'title.catch': {
-    ja: '警官から逃げて、お宝を5つ盗み出せ。<br />でも ── 仲間の中に、スパイがいる。',
-    en: 'Steal all 5 treasures and escape the cops.<br />But one of your own crew may be a spy.',
+    ja: '警官から逃げて、お宝をすべて盗み出せ。<br />でも ── 仲間の中に、スパイがいる。',
+    en: 'Steal every treasure and escape the cops.<br />But one of your own crew may be a spy.',
   },
   'rule.cop': {
     ja: '泥棒を全員確保、または時間切れでお宝を1つでも守れば勝ち。',
     en: 'Jail every thief, or keep at least one treasure safe when time runs out.',
   },
   'rule.thief': {
-    ja: 'お宝5つを全部ゲートへ運べば勝ち。運搬中は足が遅くなる。',
-    en: 'Deliver all 5 treasures. You are slower while carrying.',
+    ja: 'お宝{n}つを全部ゲートへ運べば勝ち。運搬中は足が遅くなる。',
+    en: 'Deliver all {n} treasures to the gate. You are slower while carrying.',
   },
   'rule.hide': {
     ja: '茂みで最大5秒隠れられる（出たあと3秒は隠れ直せない）。',
@@ -45,13 +45,19 @@ export const STRINGS = {
     en: 'Cops near a bush can Search to flush out hidden thieves.',
   },
   'rule.spy': {
-    ja: '人狼警察は解錠、潜入捜査官はお宝を奪い返す。見られると15秒拘束→相手陣営へ寝返り。',
-    en: 'The Wolf Cop unlocks the jail; the Undercover Agent takes loot back. Get seen and you are held 15s, then defect.',
+    ja: '人狼警察は解錠、潜入捜査官はゲートのお宝を戻す。作業を見られると15秒拘束→相手陣営へ寝返り。',
+    en: 'The Wolf Cop unlocks the jail; the Undercover Agent returns loot from the gate. Get seen working and you are held 15s, then defect.',
   },
   'time.3': { ja: '3分', en: '3 min', ko: '3분', 'zh-Hans': '3分钟', 'zh-Hant': '3分鐘' },
   'time.5': { ja: '5分', en: '5 min', ko: '5분', 'zh-Hans': '5分钟', 'zh-Hant': '5分鐘' },
   'time.7': { ja: '7分', en: '7 min', ko: '7분', 'zh-Hans': '7分钟', 'zh-Hant': '7分鐘' },
   'stage.label': { ja: 'ステージ', en: 'Stage' },
+  'players.label': { ja: '人数', en: 'Players' },
+  'players.note': {
+    ja: '{n}人（警察{cops}・泥棒{thieves}）お宝{loot}個',
+    en: '{n} players ({cops} cops · {thieves} thieves) · {loot} treasures',
+  },
+  'players.max': { ja: '最大10人まで選べます', en: 'Up to 10 players' },
   'stage.comingSoon': { ja: '準備中', en: 'Coming Soon' },
   'stage.comingSoonNote': {
     ja: '次のビルドで追加予定。ステージごとの建物と仕掛けを用意しています。',
@@ -68,7 +74,7 @@ export const STRINGS = {
   'mission.cop': { ja: '泥棒を確保しろ', en: 'Jail every thief', ko: '도둑을 모두 잡아라', 'zh-Hans': '抓住所有小偷', 'zh-Hant': '抓住所有小偷' },
   'mission.thief': { ja: 'お宝をゲートへ運べ', en: 'Carry the loot to the exit', ko: '보물을 탈출구로 운반하라', 'zh-Hans': '把宝物运到出口', 'zh-Hant': '把寶物運到出口' },
   'mission.copSpy': { ja: '牢屋を解錠しろ', en: 'Unlock the jail', ko: '감옥을 열어라', 'zh-Hans': '打开牢房', 'zh-Hant': '打開牢房' },
-  'mission.thiefSpy': { ja: '運ばれた宝を戻せ', en: 'Take delivered loot back', ko: '옮겨진 보물을 되돌려라', 'zh-Hans': '夺回运走的宝物', 'zh-Hant': '奪回運走的寶物' },
+  'mission.thiefSpy': { ja: 'ゲートからお宝を戻せ', en: 'Return loot from the gate', ko: '게이트에서 보물을 되돌려라', 'zh-Hans': '从出口把宝物退回', 'zh-Hant': '從出口把寶物退回' },
   'team.cop': { ja: '警察', en: 'cops', ko: '경찰', 'zh-Hans': '警察', 'zh-Hant': '警察' },
   'team.thief': { ja: '泥棒', en: 'thieves', ko: '도둑', 'zh-Hans': '小偷', 'zh-Hant': '小偷' },
   'role.detainedTag': { ja: '🔒 15秒拘束中', en: '🔒 Detained 15s', ko: '🔒 15초 구금 중', 'zh-Hans': '🔒 15秒拘禁中', 'zh-Hant': '🔒 15秒拘禁中' },
@@ -107,11 +113,11 @@ export const STRINGS = {
     en: 'Carry all 5 treasures to the escape gate',
   },
   'role.thiefSpy.desc': {
-    ja: '泥棒に紛れて密告・お宝を奪い返せ。見られると15秒拘束→泥棒に寝返る',
-    en: 'Blend in, tip off the cops, take treasures back. If seen: 15s detained, then you defect to the thieves',
-    ko: '도둑에 섞여 밀고·보물 되찾기. 들키면 15초 구금 후 도둑으로 전향',
-    'zh-Hans': '混在小偷里告密、夺回宝物。被发现则拘禁15秒，之后转投小偷',
-    'zh-Hant': '混在小偷裡告密、奪回寶物。被發現則拘禁15秒，之後轉投小偷',
+    ja: '泥棒に紛れて、ゲートに運ばれたお宝を戻せ。戻し作業を見られると15秒拘束→泥棒に寝返る（警察にはつかまらない）',
+    en: 'Blend in with the thieves and return delivered loot from the gate. If a thief sees you doing it: 15s detained, then you defect to the thieves (cops cannot arrest you)',
+    ko: '도둑에 섞여 게이트로 옮겨진 보물을 되돌려라. 작업을 들키면 15초 구금 후 도둑으로 전향（경찰에 잡히지 않는다）',
+    'zh-Hans': '混在小偷里把运到出口的宝物退回。被小偷看到作业则拘禁15秒，之后转投小偷（警察抓不到你）',
+    'zh-Hant': '混在小偷裡把運到出口的寶物退回。被小偷看到作業則拘禁15秒，之後轉投小偷（警察抓不到你）',
   },
   'role.spyUnified.desc': {
     ja: '相手陣営に見られると15秒拘束→見た目どおりの陣営へ寝返る',
@@ -178,7 +184,7 @@ export const STRINGS = {
   'stat.arrests': { ja: '確保', en: 'Arrests' },
   'stat.secured': { ja: 'お宝搬出', en: 'Delivered' },
   'stat.rescue': { ja: '救出・解錠', en: 'Rescues' },
-  'stat.returns': { ja: '奪い返し', en: 'Taken back' },
+  'stat.returns': { ja: 'お宝を戻した', en: 'Loot returned' },
   'stat.exposed': { ja: '正体発覚', en: 'Exposed' },
   'stat.hides': { ja: '隠れた', en: 'Hides' },
   'stat.searches': { ja: '捜索', en: 'Searches' },
@@ -227,8 +233,8 @@ export const STRINGS = {
   },
   'howto.spy': { ja: 'スパイ', en: 'Spies' },
   'howto.spyDesc': {
-    ja: '警察側にいる「人狼警察」は牢屋を解錠、泥棒側にいる「潜入捜査官（FBI）」は運ばれたお宝を奪い返す。片側だけの設定ではどちらも「人狼（スパイ）」と呼ぶ。',
-    en: 'The Wolf Cop on the police side unlocks the jail; the Undercover Agent (FBI) among the thieves takes delivered loot back. With only one side set, both are simply called \'Wolf (Spy)\'.',
+    ja: '警察側にいる「人狼警察」は牢屋を解錠、泥棒側にいる「潜入捜査官（FBI）」はゲートに運ばれたお宝を戻す。どちらも作業を見られると15秒拘束→相手陣営へ寝返り。潜入捜査官は警察の通常逮捕対象外（警察につかまらない）。片側だけの設定ではどちらも「人狼（スパイ）」と呼ぶ。',
+    en: 'The Wolf Cop on the police side unlocks the jail; the Undercover Agent (FBI) among the thieves returns delivered loot from the gate. Either one seen working is held 15s, then defects. The Undercover Agent cannot be arrested by cops. With only one side set, both are simply called \'Wolf (Spy)\'.',
   },
   'howto.betray': { ja: '寝返り', en: 'Defection' },
   'howto.betrayDesc': {

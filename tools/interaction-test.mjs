@@ -357,6 +357,14 @@ out.detainStart = await page.evaluate(() => {
   };
 });
 await page.waitForTimeout(250);
+// ヘッドレスではrAFが遅いので、カードが切り替わるまで待ってから読む
+try {
+  await page.waitForFunction(() => /拘束/.test(document.getElementById('roleTag').textContent), null, {
+    timeout: 5000,
+  });
+} catch {
+  /* 下のチェックで失敗として報告する */
+}
 out.detainCard = await roleOf();
 check(out.detainStart.state === 'detained', '発覚しても拘束状態にならない');
 check(out.detainStart.jail, '拘束中のカメラが俯瞰にならない');
@@ -368,6 +376,9 @@ check(
 check(/スティックで周りを見渡せる/.test(out.detainCard.chip), '拘束中のカメラ操作の案内がない');
 
 // スティックでカメラがパンし、キャラは動かない
+await page
+  .waitForFunction(() => Math.abs(window.__dorokei.world.lookPan.z - 58) < 0.01, null, { timeout: 5000 })
+  .catch(() => {});
 out.jailPanBefore = await page.evaluate(() => {
   const { game, world } = window.__dorokei;
   const p = game.player;
@@ -400,6 +411,13 @@ check(
 
 // 15秒経過 → 見た目どおりの陣営へ寝返り、カードが即切り替わる
 await page.evaluate(() => window.__dorokei.game.stepSeconds(16));
+try {
+  await page.waitForFunction(() => /泥棒/.test(document.getElementById('roleTag').textContent), null, {
+    timeout: 5000,
+  });
+} catch {
+  /* 下のチェックで失敗として報告する */
+}
 await page.waitForTimeout(300);
 out.defect = await roleOf();
 out.defectInfo = await page.evaluate(() => {
@@ -533,6 +551,182 @@ for (const [name, viewport] of [
 }
 await page.setViewportSize({ width: 900, height: 600 });
 await page.waitForTimeout(200);
+
+// ---- Build 4: iOS のコピー・長押し選択の無効化 -------------------------
+out.copyGuard = await page.evaluate(async () => {
+  const btn = document.getElementById('actionBtn');
+  const ctx = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+  btn.dispatchEvent(ctx);
+  const sel = new Event('selectstart', { bubbles: true, cancelable: true });
+  document.body.dispatchEvent(sel);
+  const dbl = new MouseEvent('dblclick', { bubbles: true, cancelable: true });
+  btn.dispatchEvent(dbl);
+  const css = getComputedStyle(document.body);
+  const btnCss = getComputedStyle(btn);
+  const inputCss = getComputedStyle(document.getElementById('langSelect'));
+  return {
+    context: ctx.defaultPrevented,
+    select: sel.defaultPrevented,
+    dbl: dbl.defaultPrevented,
+    bodySelect: css.webkitUserSelect || css.userSelect,
+    btnSelect: btnCss.webkitUserSelect || btnCss.userSelect,
+    callout: css.webkitTouchCallout || '',
+    // Chromium は -webkit-touch-callout を CSSOM から落とすので、配信中のCSSを直接読んで確認する
+    calloutCss: await fetch('/styles.css')
+      .then((r) => r.text())
+      .then((txt) => /-webkit-touch-callout:\s*none/.test(txt) && /-webkit-user-select:\s*none/.test(txt)),
+    inputSelect: inputCss.webkitUserSelect || inputCss.userSelect,
+  };
+});
+check(out.copyGuard.context && out.copyGuard.select, '長押しのコピー・選択が抑止されない');
+check(out.copyGuard.bodySelect === 'none' && out.copyGuard.btnSelect === 'none', 'user-select が無効化されていない');
+check(out.copyGuard.callout === 'none' || out.copyGuard.calloutCss, 'iOS のコールアウトが無効化されていない');
+check(out.copyGuard.inputSelect === 'text', '入力欄まで選択できなくなっている');
+
+// ---- Build 4: 人数選択（4〜10人）と内訳・お宝数 ----------------------
+await page.evaluate(() => document.getElementById('homeBtn')?.click());
+await page.waitForTimeout(300);
+await page.click('#sizePick .seg-btn[data-size="10"]');
+await page.waitForTimeout(200);
+out.size10 = await page.evaluate(() => ({
+  note: document.getElementById('sizeNote').textContent,
+  active: document.querySelector('#sizePick .seg-btn.active')?.dataset.size,
+  saved: window.__dorokei.settings.players,
+  rule: document.getElementById('ruleThief').textContent,
+  goal: document.getElementById('lootGoal').textContent,
+  buttons: [...document.querySelectorAll('#sizePick .seg-btn')].map((b) => b.dataset.size),
+}));
+check(out.size10.buttons.length === 7, '人数の選択肢が7段階でない');
+check(out.size10.active === '10' && Number(out.size10.saved) === 10, '10人の選択が保存されない');
+check(/10人/.test(out.size10.note) && /警察4/.test(out.size10.note) && /泥棒6/.test(out.size10.note), `人数の内訳表示が違う (${out.size10.note})`);
+check(/お宝5個/.test(out.size10.note) && out.size10.goal === '×5', 'お宝数の表示が合わない');
+
+await page.click('#sizePick .seg-btn[data-size="4"]');
+await page.waitForTimeout(200);
+out.size4 = await page.evaluate(() => ({
+  note: document.getElementById('sizeNote').textContent,
+  rule: document.getElementById('ruleThief').textContent,
+  goal: document.getElementById('lootGoal').textContent,
+}));
+check(/お宝3個/.test(out.size4.note) && out.size4.goal === '×3', '4人でお宝3個にならない');
+check(/お宝3つ/.test(out.size4.rule), `ルール説明が人数に追従しない (${out.size4.rule})`);
+
+// 10人で実際に始めて、HUD・識別タグ・牢屋まで破綻しない
+await page.evaluate(() => {
+  document.querySelector('#sizePick .seg-btn[data-size="10"]').click();
+});
+await page.click('#startBtn');
+await page.waitForTimeout(900);
+out.ten = await page.evaluate(() => {
+  const g = window.__dorokei.game;
+  const tags = [...window.__dorokei.world.chars.values()].map((c) => c.userData.tagText);
+  return {
+    players: g.players,
+    agents: g.agents.length,
+    thieves: g.counts().thieves,
+    cops: g.counts().cops,
+    required: g.cfg.treasureRequired,
+    hudCop: document.getElementById('copCount').textContent,
+    hudThief: document.getElementById('thiefCount').textContent,
+    hudLoot: document.getElementById('lootCount').textContent,
+    tags,
+    jailSlots: g.freeJailSlot() >= 0,
+  };
+});
+check(out.ten.players === 10 && out.ten.agents === 10, `10人で始まらない (${out.ten.agents})`);
+check(out.ten.thieves + out.ten.cops === 10, '10人のHUDの人数が合わない');
+check(out.ten.hudLoot === `0/${out.ten.required}`, `お宝の目標数がHUDと合わない (${out.ten.hudLoot})`);
+check(new Set(out.ten.tags).size === 10 && out.ten.tags.includes('YOU'), `識別タグが10人分ない (${out.ten.tags.join(',')})`);
+
+// ---- Build 4: ビルのオクルージョン透過 + ゲート運搬ガイド ------------
+out.occlusion = await page.evaluate(() => {
+  const { game, world, freeze } = window.__dorokei;
+  freeze(true);
+  const p = game.player;
+  for (const a of game.agents) if (a !== p) { a.x = 74; a.z = 74; }
+  // 美術館（62,-16）のすぐ南に立ち、カメラは美術館の向こう（北）になる
+  p.state = 'free';
+  p.x = 62;
+  p.z = -24.6;
+  p.carrying = null;
+  world.setView('follow');
+  world.snapCamera();
+  for (let i = 0; i < 40; i++) world.update(game, 1 / 60);
+  const museum = world.buildings.find((b) => Math.abs(b.x - 62) < 1 && Math.abs(b.z + 16) < 1);
+  const faded = { occluded: world.occluded, fade: museum ? +museum.fade.toFixed(2) : null, lift: +world.camLift.toFixed(1) };
+
+  // お宝を運ぶと足元のガイド矢印が出る
+  const t0 = game.treasures[0];
+  t0.state = 'carried';
+  t0.carrier = p.id;
+  p.carrying = t0.id;
+  p.x = 10;
+  p.z = 40;
+  world.update(game, 1 / 60);
+  const guide = {
+    visible: !!world.carryGuide?.visible,
+    z: +world.carryGuide.position.z.toFixed(1),
+    rot: +world.carryGuide.rotation.y.toFixed(2),
+  };
+  p.carrying = null;
+  t0.state = 'vault';
+  return { faded, guide };
+});
+check(out.occlusion.faded.occluded > 0, 'ビルが透けない');
+check(out.occlusion.faded.fade !== null && out.occlusion.faded.fade < 0.6, `透過が進まない (${out.occlusion.faded.fade})`);
+check(out.occlusion.guide.visible, 'お宝運搬中のガイド矢印が出ない');
+check(out.occlusion.guide.z > 40.5, 'ガイド矢印がゲート方向を向いていない');
+
+// ---- Build 4: タッチ救出と「⚠ 接近！」アラート -----------------------
+out.rescue = await page.evaluate(async () => {
+  const { game, startGame, world } = window.__dorokei;
+  startGame({ players: 8, playerRole: 'thief', playerSpy: 'never', spyMode: 'none', seed: 44 });
+  await new Promise((r) => setTimeout(r, 300));
+  const g = window.__dorokei.game;
+  const p = g.player;
+  for (const a of g.agents) if (a !== p && a.state === 'free') { a.x = 74; a.z = 74; }
+  const mate = g.agents.find((a) => a.role === 'thief' && a !== p);
+  const slot = g.freeJailSlot();
+  mate.state = 'jailed';
+  mate.jailSlot = slot;
+  mate.jailedAt = g.t;
+  mate.x = g.agents.length ? 0 : 0;
+  mate.x = -68 + (slot % 3) * 6;
+  mate.z = slot < 3 ? 58 : 65;
+  p.x = mate.x + 1.0;
+  p.z = mate.z;
+  g.stepSeconds(0.2);
+  const afterRescue = { mateState: mate.state, immune: +mate.immune.toFixed(1), boost: +mate.escapeT.toFixed(1), stats: g.stats.touchRescues };
+
+  // ⚠ 接近！アラート（スパイで相手が近づいた時）
+  startGame({ players: 8, playerRole: 'cop', playerSpy: 'always', spyMode: 'both', seed: 45 });
+  await new Promise((r) => setTimeout(r, 250));
+  const g2 = window.__dorokei.game;
+  const spy = g2.player;
+  const opp = g2.agents.find((a) => a.role === 'cop' && a !== spy);
+  for (const a of g2.agents) if (a !== spy && a !== opp && a.state === 'free') { a.x = 74; a.z = 74; }
+  spy.x = 0;
+  spy.z = 0;
+  opp.x = 12;
+  opp.z = 0;
+  window.__dorokei.freeze(true);
+  world.update(g2, 1 / 60);
+  return { afterRescue, alert: g2.spyAlert(spy) };
+});
+check(out.rescue.afterRescue.mateState === 'free', 'タッチで救出できない');
+check(out.rescue.afterRescue.immune > 2 && out.rescue.afterRescue.boost > 0, '救出後の無敵＋加速がない');
+check(out.rescue.alert && out.rescue.alert.dist < 13, '接近アラートが出ない');
+
+await page.waitForTimeout(200);
+const alertDom = await page.evaluate(() => {
+  const g = window.__dorokei.game;
+  const spy = g.player;
+  g.step(1 / 60);
+  const el = document.getElementById('spyAlert');
+  return { hidden: el.classList.contains('hidden'), text: el.textContent };
+});
+check(!alertDom.hidden && /接近/.test(alertDom.text), `⚠ 接近！の表示が出ない (${alertDom.text})`);
+await page.evaluate(() => window.__dorokei.freeze(false));
 
 // ---- リザルト -------------------------------------------------------------
 await page.evaluate(() => {

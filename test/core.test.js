@@ -198,7 +198,7 @@ test('お宝を拾って脱出ゲートへ運ぶと得点、5つすべてで泥�
   assert.equal(g.winner, 'thieves');
 });
 
-test('お宝を運んでいると移動速度が 6.8 → 5.4 に落ちる', () => {
+test('お宝を運んでいると移動速度が落ちる（Build 4 で 6.8 → 6.2 に再調整）', () => {
   const g = makeGame({ playerRole: 'thief', playerSpy: 'never' });
   const player = g.player;
   park(g, [player]);
@@ -207,7 +207,7 @@ test('お宝を運んでいると移動速度が 6.8 → 5.4 に落ちる', () =
   g.setPlayerMove(1, 0);
   g.stepSeconds(1.0, 1 / 60);
   const normal = player.x;
-  assert.ok(normal > 6.5 && normal < 7.0, `通常 ${normal.toFixed(2)}m/s`);
+  assert.ok(normal > 6.5 && normal < 7.2, `通常 ${normal.toFixed(2)}m/s`);
 
   const t = g.treasures[0];
   t.state = 'carried';
@@ -217,8 +217,8 @@ test('お宝を運んでいると移動速度が 6.8 → 5.4 に落ちる', () =
   player.z = 30;
   g.stepSeconds(1.0, 1 / 60);
   const carrying = player.x;
-  assert.ok(carrying > 5.1 && carrying < 5.6, `運搬中 ${carrying.toFixed(2)}m/s`);
-  assert.ok(normal - carrying > 1.0, '運搬中ははっきり遅い');
+  assert.ok(carrying > 5.9 && carrying < 6.5, `運搬中 ${carrying.toFixed(2)}m/s`);
+  assert.ok(normal - carrying > 0.5, '運搬中ははっきり遅い');
 });
 
 test('時間切れで1つでも守れていれば警察陣営の勝利', () => {
@@ -417,8 +417,8 @@ test('解錠中を他の警官に近くで見られると正体発覚し、解�
   assert.equal(spy.role, ROLE.COP, '15秒後に警察へ寝返る');
 });
 
-// ---- 泥棒側スパイ（密告者）のお宝奪い返し ---------------------------------
-test('密告者は脱出ゲート前の長押しで、運ばれたお宝を街へ隠し戻せる', () => {
+// ---- 泥棒側スパイ（潜入捜査官）のお宝戻し -------------------------------
+test('潜入捜査官は脱出ゲート前の長押しで、運ばれたお宝を街へ戻せる', () => {
   const g = makeGame({ playerRole: 'thief', playerSpy: 'always' });
   const spy = g.player;
   assert.equal(spy.role, ROLE.THIEF_SPY);
@@ -471,7 +471,7 @@ test('お宝の隠し戻し中を他の泥棒に見られると正体発覚し�
   assert.equal(g.stats.defections, 1);
 });
 
-test('密告者はお宝を運べない（盗むのは本物の泥棒の役目）', () => {
+test('潜入捜査官はお宝を運べない（盗むのは本物の泥棒の役目）', () => {
   const g = makeGame({ playerRole: 'thief', playerSpy: 'always' });
   const spy = g.player;
   park(g, [spy]);
@@ -483,8 +483,8 @@ test('密告者はお宝を運べない（盗むのは本物の泥棒の役目�
   assert.equal(spy.carrying, null);
 });
 
-// ---- 密告ピン -------------------------------------------------------------
-test('密告者は近くの泥棒の位置を警察へピンで知らせる', () => {
+// ---- 旧アクション（位置ピン）は Build 4 で廃止 -----------------------------
+test('旧「位置ピン」アクションは廃止され、ピンもイベントも出ない', () => {
   const g = makeGame({ playerRole: 'thief', playerSpy: 'always' });
   const spy = g.player;
   for (const a of g.agents) if (a.team === 'thief' && a !== spy) { a.x = 73; a.z = 73; }
@@ -493,13 +493,14 @@ test('密告者は近くの泥棒の位置を警察へピンで知らせる', ()
   thieves[0].z = spy.z;
   thieves[1].x = spy.x;
   thieves[1].z = spy.z + 3;
-  assert.equal(g.whistle(spy), true);
-  assert.equal(g.pings.length, 2);
-  assert.equal(g.stats.whistles, 1);
-  assert.ok(spy.whistleCd > 0);
-  assert.equal(g.whistle(spy), false, 'クールダウン中は撃てない');
-  g.stepSeconds(CFG.pingTtl + 0.5);
-  assert.equal(g.pings.length, 0, 'ピンは数秒で消える');
+  assert.equal(g.whistle(spy), false);
+  assert.equal(g.pings.length, 0);
+  assert.equal(g.stats.whistles, 0);
+  // ボタンを押しても何も起きない（お宝戻しはゲート前の長押しのみ）
+  g.setAction(true);
+  g.setAction(false);
+  assert.equal(g.pings.length, 0);
+  assert.equal(g.events.some((e) => e.type === 'whistle'), false);
 });
 
 // ---- 経路探索 -------------------------------------------------------------

@@ -118,6 +118,28 @@ export class Minimap {
     }
   }
 
+  /** 牢屋・ゲートの位置サイン（Build 4：点滅リング＋ラベルで一目で分かる） */
+  marker(g, x, y, label, color, now, phase) {
+    const pulse = (Math.sin(now * 3 + phase) + 1) / 2;
+    g.beginPath();
+    g.arc(x, y, (4.2 + pulse * 2.6) * this.dpr, 0, Math.PI * 2);
+    g.strokeStyle = color;
+    g.globalAlpha = 0.85 - pulse * 0.45;
+    g.lineWidth = this.dpr * 1.5;
+    g.stroke();
+    g.globalAlpha = 1;
+    g.font = `bold ${Math.round(7.5 * this.dpr)}px "Liberation Sans", "Helvetica Neue", system-ui, sans-serif`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    const w = g.measureText(label).width + 4 * this.dpr;
+    g.fillStyle = color;
+    g.globalAlpha = 0.9;
+    g.fillRect(x - w / 2, y - 13.4 * this.dpr, w, 7.4 * this.dpr);
+    g.globalAlpha = 1;
+    g.fillStyle = '#ffffff';
+    g.fillText(label, x, y - 9.6 * this.dpr);
+  }
+
   draw(game) {
     const g = this.ctx;
     const S = this.size;
@@ -143,7 +165,7 @@ export class Minimap {
       }
     }
 
-    // 密告ピン
+    // 位置ピン（Build 4 以降はこのピンは使わないので通常は空）
     for (const p of game.pings) {
       g.beginPath();
       g.arc(this.tx(p.x), this.tz(p.z), 5 * this.dpr, 0, Math.PI * 2);
@@ -154,6 +176,11 @@ export class Minimap {
 
     const player = game.player;
     if (!player) return;
+
+    // Build 4: 牢屋と脱出ゲートの位置を点滅サインで示す
+    const now = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+    this.marker(g, this.tx(MAP.jail.x), this.tz(MAP.jail.z), 'JAIL', '#2f6fd8', now, 0);
+    this.marker(g, this.tx(MAP.gate.x), this.tz(MAP.gate.z), 'EXIT', '#1fae6b', now, 1.4);
 
     // 仲間と近くの相手
     for (const a of game.agents) {

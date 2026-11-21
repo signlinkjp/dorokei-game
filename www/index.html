@@ -56,6 +56,9 @@
       <div class="gauge-bar"><i id="gaugeFill"></i></div>
     </div>
 
+    <!-- Build 4: スパイ作業中の「⚠ 接近！」アラート（相手が発覚距離より手前に来たら出る） -->
+    <div id="spyAlert" class="spy-alert hidden">⚠ 接近!</div>
+
     <div id="hideGauge" class="hide-gauge hidden">
       <span id="hideLabel">隠れ</span>
       <div class="gauge-bar"><i id="hideFill"></i></div>
@@ -117,6 +120,19 @@
         </div>
         <div id="stageNote" class="stage-note hidden"></div>
         <div class="setup-row">
+          <span class="setup-label" data-i18n="players.label">人数</span>
+          <div class="seg small" id="sizePick">
+            <button class="seg-btn" data-size="4" type="button">4</button>
+            <button class="seg-btn" data-size="5" type="button">5</button>
+            <button class="seg-btn" data-size="6" type="button">6</button>
+            <button class="seg-btn" data-size="7" type="button">7</button>
+            <button class="seg-btn active" data-size="8" type="button">8</button>
+            <button class="seg-btn" data-size="9" type="button">9</button>
+            <button class="seg-btn" data-size="10" type="button">10</button>
+          </div>
+        </div>
+        <div id="sizeNote" class="stage-note size-note">8人（警察3・泥棒5）</div>
+        <div class="setup-row">
           <span class="setup-label" data-i18n="role.label">あなたの役</span>
           <div class="seg" id="rolePick">
             <button class="seg-btn active" data-role="auto" type="button" data-i18n="role.auto">おまかせ</button>
@@ -152,15 +168,15 @@
 
       <div class="rules">
         <div class="rule"><b class="c-cop">警察</b><span data-i18n="rule.cop">泥棒を全員確保、または時間切れでお宝を1つでも守れば勝ち。</span></div>
-        <div class="rule"><b class="c-thief">泥棒</b><span data-i18n="rule.thief">お宝5つを全部ゲートへ運べば勝ち。運搬中は足が遅くなる。</span></div>
+        <div class="rule"><b class="c-thief">泥棒</b><span id="ruleThief" data-i18n="rule.thief">お宝5つを全部ゲートへ運べば勝ち。運搬中は足が遅くなる。</span></div>
         <div class="rule"><b class="c-hide">隠れる</b><span data-i18n="rule.hide">茂みで最大5秒隠れられる（出たあと3秒は隠れ直せない）。</span></div>
         <div class="rule"><b class="c-search">捜索</b><span data-i18n="rule.search">警察は茂みの近くで「🔍 捜索」、隠れている泥棒を炙り出す。</span></div>
-        <div class="rule"><b class="c-spy">スパイ</b><span data-i18n="rule.spy">内通者は解錠、密告者はお宝を奪い返す。見られると正体発覚。</span></div>
+        <div class="rule"><b class="c-spy">スパイ</b><span data-i18n="rule.spy">人狼警察は解錠、潜入捜査官はゲートのお宝を戻す。作業を見られると15秒拘束→寝返り。</span></div>
       </div>
 
       <div class="title-links">
         <button id="privacyBtn" class="link-btn" type="button" data-i18n="btn.privacy">プライバシーポリシー</button>
-        <span class="version">1.0.0 · Build 3</span>
+        <span class="version">1.0.0 · Build 4</span>
       </div>
     </div>
   </div>
@@ -179,7 +195,7 @@
           <i>›</i>
           <div class="flow-step"><span>🔍</span><b data-i18n="search.name">捜索</b><small>4.5m</small></div>
           <i>›</i>
-          <div class="flow-step"><span>💎</span><b data-i18n="hud.loot">お宝</b><small>×5</small></div>
+          <div class="flow-step"><span>💎</span><b data-i18n="hud.loot">お宝</b><small id="lootGoal">×5</small></div>
           <i>›</i>
           <div class="flow-step"><span>🏁</span><b>EXIT</b></div>
         </div>

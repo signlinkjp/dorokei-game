@@ -12,7 +12,28 @@
   --shadow-soft: 0 4px 12px rgba(18, 44, 86, 0.12);
 }
 
-* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  /* Build 4: ゲーム画面での長押しコピー・文字選択・iOS のコールアウトを無効化 */
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+/* 入力欄（設定の言語選択など）だけは例外的に選択できるようにする */
+input,
+textarea,
+select,
+option,
+[contenteditable='true'] {
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+  user-select: text;
+}
 
 html, body {
   margin: 0;
@@ -22,6 +43,8 @@ html, body {
   color: var(--ink);
   font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", "WenQuanYi Zen Hei", system-ui, sans-serif;
   user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
   touch-action: none;
 }
 
@@ -91,7 +114,7 @@ html, body {
 }
 #minimap { display: block; border-radius: 11px; }
 .radar-label {
-  position: absolute; right: 10px; bottom: 8px;
+  position: absolute; right: 9px; top: 7px;
   font-size: 8px; font-weight: 900; letter-spacing: 0.18em;
   color: #ffffff; background: rgba(27, 74, 156, 0.55);
   padding: 1px 5px; border-radius: 999px;
@@ -251,6 +274,18 @@ html, body {
   text-shadow: 0 1px 3px rgba(10, 30, 60, 0.6);
 }
 
+/* Build 4: スパイ作業中の「⚠ 接近！」アラート（アクションボタンの上） */
+.spy-alert {
+  position: absolute; right: max(22px, env(safe-area-inset-right)); bottom: 200px;
+  padding: 6px 11px; border-radius: 12px;
+  background: rgba(232, 68, 63, 0.94); color: #ffffff;
+  font-size: 11.5px; font-weight: 900; letter-spacing: 0.02em;
+  border: 2px solid #ffffff; box-shadow: 0 6px 18px rgba(180, 30, 30, 0.42);
+  pointer-events: none; animation: alertPulse 0.95s ease-in-out infinite;
+}
+.spy-alert.danger { background: rgba(196, 16, 16, 0.98); font-size: 12.5px; }
+@keyframes alertPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.07); } }
+
 /* hide timer gauge（右のアクションボタンの上） */
 .hide-gauge {
   position: absolute; right: max(22px, env(safe-area-inset-right)); bottom: 150px;
@@ -403,6 +438,13 @@ html, body {
 .stage-note {
   font-size: 10px; line-height: 1.5; font-weight: 700; color: var(--blue-d);
   background: rgba(47, 111, 216, 0.09); border-radius: 9px; padding: 6px 9px; text-align: left;
+}
+
+/* Build 4: 参加人数（4〜10人）の選択 */
+#sizePick .seg-btn { font-size: 10.5px; padding: 7px 0; }
+.size-note {
+  font-size: 9.5px; padding: 5px 9px; margin: -2px 0 0;
+  text-align: center; letter-spacing: 0.02em;
 }
 
 /* ---- タイトルのツールボタン ---- */

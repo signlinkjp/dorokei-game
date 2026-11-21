@@ -355,6 +355,10 @@ test('Build 3 のワークフロー定義（1行目が # で始まり、BUILD_NU
   assert.match(yml, /id="roleCard"/);
   assert.match(yml, /id="menuBtn"/);
   const pbx = read('ios/App/App.xcodeproj/project.pbxproj');
-  assert.equal((pbx.match(/CURRENT_PROJECT_VERSION = 3;/g) || []).length, 2);
+  // Build 3 以降、ビルド番号は Build 4 へ引き継がれる（2箇所とも同じ番号で、巻き戻らない）
+  const versions = [...pbx.matchAll(/CURRENT_PROJECT_VERSION = (\d+);/g)].map((m) => Number(m[1]));
+  assert.equal(versions.length, 2);
+  assert.equal(new Set(versions).size, 1, '2箇所のビルド番号が揃っている');
+  assert.ok(versions[0] >= 3, 'ビルド番号が Build 3 より戻っていない');
   assert.ok(!/CURRENT_PROJECT_VERSION = 2;/.test(pbx));
 });
